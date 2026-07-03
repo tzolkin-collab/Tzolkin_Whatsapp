@@ -422,10 +422,8 @@
     summary {
       cursor: pointer;
       list-style: none;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 22px 0;
+      position: relative;
+      padding: 22px 32px 22px 0;
       font-family: "Geist", sans-serif;
       font-weight: 600;
       font-size: 17px;
@@ -438,6 +436,10 @@
 
     summary::after {
       content: "+";
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
       font-weight: 400;
       font-size: 22px;
       color: var(--muted);
@@ -445,7 +447,7 @@
     }
 
     details[open] summary::after {
-      transform: rotate(45deg);
+      transform: translateY(-50%) rotate(45deg);
     }
 
     details p {

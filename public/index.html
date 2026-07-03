@@ -705,14 +705,403 @@
       </div>
     </div>
   </footer>
+  <!-- Checkout Modal -->
+  <div id="checkout-overlay" class="checkout-overlay" onclick="if(event.target===this)closeCheckout()">
+    <div class="checkout-modal">
+      <!-- Step 1: Form -->
+      <div id="checkout-form-step" class="checkout-step">
+        <button class="checkout-close" onclick="closeCheckout()" aria-label="Fechar">&times;</button>
+        <h3>Assine o Conector</h3>
+        <p class="checkout-sub">Preencha seus dados. Você receberá sua chave de acesso e o link de pagamento na sequência.</p>
+        <form id="checkout-form" onsubmit="handleCheckout(event)">
+          <div class="field">
+            <label for="ck-name">Nome completo</label>
+            <input id="ck-name" name="name" type="text" required autocomplete="name" placeholder="Maria da Silva">
+          </div>
+          <div class="field">
+            <label for="ck-email">E-mail</label>
+            <input id="ck-email" name="email" type="email" required autocomplete="email" placeholder="maria@empresa.com">
+          </div>
+          <div class="field">
+            <label for="ck-cpfcnpj">CPF ou CNPJ</label>
+            <input id="ck-cpfcnpj" name="cpfCnpj" type="text" required placeholder="000.000.000-00" autocomplete="off">
+          </div>
+          <fieldset class="plan-selector">
+            <legend>Plano</legend>
+            <label class="plan-option">
+              <input type="radio" name="plan" value="padrao" checked>
+              <span class="plan-card">
+                <strong>Conexão padrão</strong>
+                <span class="plan-price">R$ 197<small>/mês</small></span>
+              </span>
+            </label>
+            <label class="plan-option">
+              <input type="radio" name="plan" value="oficial">
+              <span class="plan-card">
+                <strong>API Oficial (Meta)</strong>
+                <span class="plan-price">R$ 347<small>/mês</small></span>
+              </span>
+            </label>
+          </fieldset>
+          <button type="submit" class="pill cta checkout-submit" id="checkout-submit-btn">
+            <span id="checkout-btn-text">Assinar</span>
+            <span id="checkout-spinner" class="spinner" hidden></span>
+          </button>
+          <p id="checkout-error" class="checkout-error" hidden></p>
+        </form>
+      </div>
+
+      <!-- Step 2: Success -->
+      <div id="checkout-success-step" class="checkout-step" hidden>
+        <button class="checkout-close" onclick="closeCheckout()" aria-label="Fechar">&times;</button>
+        <div class="success-icon">✓</div>
+        <h3>Conta criada!</h3>
+        <p class="checkout-sub">Guarde sua chave de acesso — ela é exibida apenas uma vez.</p>
+        <div class="key-box">
+          <code id="access-key-display"></code>
+          <button class="copy-btn" onclick="copyKey()" title="Copiar chave">
+            <span id="copy-label">Copiar</span>
+          </button>
+        </div>
+        <p class="checkout-sub" style="margin-top:16px;">Agora finalize o pagamento para ativar o conector:</p>
+        <a id="payment-link" class="pill cta checkout-submit" href="#" target="_blank" rel="noopener">Ir para o pagamento</a>
+        <p class="checkout-note">Após a confirmação do pagamento, sua chave será ativada automaticamente.</p>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* ---- Checkout Modal ---- */
+    .checkout-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .3s var(--ease-sophisticated);
+      padding: 24px;
+    }
+
+    .checkout-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .checkout-modal {
+      background: var(--foreground);
+      color: var(--background);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 460px;
+      padding: 40px 36px;
+      position: relative;
+      transform: scale(0.95) translateY(10px);
+      transition: transform .35s var(--ease-sophisticated);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .checkout-overlay.open .checkout-modal {
+      transform: scale(1) translateY(0);
+    }
+
+    .checkout-close {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 28px;
+      cursor: pointer;
+      line-height: 1;
+      transition: color .2s;
+    }
+
+    .checkout-close:hover {
+      color: var(--background);
+    }
+
+    .checkout-modal h3 {
+      font-family: "Geist", sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+
+    .checkout-sub {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    .field input::placeholder {
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    .field input:focus {
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+    }
+
+    .plan-selector {
+      border: none;
+      margin-bottom: 24px;
+    }
+
+    .plan-selector legend {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .plan-selector {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .plan-option {
+      cursor: pointer;
+    }
+
+    .plan-option input[type="radio"] {
+      display: none;
+    }
+
+    .plan-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: border-color .2s, background .2s;
+    }
+
+    .plan-option input:checked + .plan-card {
+      border-color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .plan-card strong {
+      font-size: 14px;
+    }
+
+    .plan-price {
+      font-family: "Geist", sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .plan-price small {
+      font-weight: 400;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .checkout-submit {
+      width: 100%;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .checkout-error {
+      color: #f87171;
+      font-size: 13px;
+      margin-top: 12px;
+      text-align: center;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(0, 0, 0, 0.15);
+      border-top-color: var(--foreground);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Success step */
+    .success-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: #22c55e;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+
+    .key-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 4px;
+    }
+
+    .key-box code {
+      flex: 1;
+      font-size: 14px;
+      word-break: break-all;
+      color: #fff;
+      font-family: "Geist Mono", monospace;
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .2s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    .checkout-note {
+      color: rgba(255, 255, 255, 0.45);
+      font-size: 12px;
+      text-align: center;
+      margin-top: 16px;
+    }
+  </style>
 
   <script>
-    // Um único lugar para configurar o destino dos CTAs.
-    // TODO(Gustavo): trocar pelo número comercial da Tzolkin.
-    const WHATSAPP_NUMBER = "5500000000000";
-    const CTA_TEXT = "Oi! Quero conectar meu WhatsApp ao Claude.";
-    const url = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent(CTA_TEXT);
-    document.querySelectorAll("a.cta").forEach((a) => { a.href = url; a.target = "_blank"; a.rel = "noopener"; });
+    // --- Checkout Modal Logic ---
+    const overlay = document.getElementById("checkout-overlay");
+    const formStep = document.getElementById("checkout-form-step");
+    const successStep = document.getElementById("checkout-success-step");
+
+    function openCheckout(e) {
+      if (e) e.preventDefault();
+      formStep.hidden = false;
+      successStep.hidden = true;
+      document.getElementById("checkout-form").reset();
+      document.getElementById("checkout-error").hidden = true;
+      overlay.classList.add("open");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeCheckout() {
+      overlay.classList.remove("open");
+      document.body.style.overflow = "";
+    }
+
+    async function handleCheckout(e) {
+      e.preventDefault();
+      const form = e.target;
+      const btn = document.getElementById("checkout-submit-btn");
+      const btnText = document.getElementById("checkout-btn-text");
+      const spinner = document.getElementById("checkout-spinner");
+      const errorEl = document.getElementById("checkout-error");
+
+      btn.disabled = true;
+      btnText.textContent = "Processando…";
+      spinner.hidden = false;
+      errorEl.hidden = true;
+
+      const body = {
+        name: form.name.value.trim(),
+        email: form.email.value.trim(),
+        cpfCnpj: form.cpfCnpj.value.replace(/\D/g, ""),
+        plan: form.plan.value,
+      };
+
+      try {
+        const res = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Erro ao processar.");
+
+        // Show success
+        document.getElementById("access-key-display").textContent = data.accessKey;
+        document.getElementById("payment-link").href = data.invoiceUrl;
+
+        formStep.hidden = true;
+        successStep.hidden = false;
+      } catch (err) {
+        errorEl.textContent = err.message;
+        errorEl.hidden = false;
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = "Assinar";
+        spinner.hidden = true;
+      }
+    }
+
+    function copyKey() {
+      const key = document.getElementById("access-key-display").textContent;
+      navigator.clipboard.writeText(key).then(() => {
+        const label = document.getElementById("copy-label");
+        label.textContent = "Copiado!";
+        setTimeout(() => { label.textContent = "Copiar"; }, 2000);
+      });
+    }
+
+    // Wire up all CTA buttons to open the checkout modal
+    document.querySelectorAll("a.cta").forEach((a) => {
+      a.href = "#";
+      a.addEventListener("click", openCheckout);
+    });
   </script>
 
 </body>

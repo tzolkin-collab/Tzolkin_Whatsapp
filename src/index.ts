@@ -5,7 +5,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { randomUUID } from "crypto";
+import { randomUUID, randomBytes } from "crypto";
+import rateLimit from "express-rate-limit";
 import { pathToFileURL, fileURLToPath } from "url";
 import path from "path";
 import express from "express";
@@ -843,6 +844,66 @@ export function createApp(dir: TenantDirectory | null): express.Express {
 
       app.use("/admin", admin);
     }
+
+    // --- Public self-service checkout ------------------------------------------
+    const checkoutLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 5,
+      message: { error: "Muitas tentativas. Aguarde 15 minutos." },
+    });
+
+    app.post("/api/checkout", checkoutLimiter, express.json(), async (req, res) => {
+      try {
+        if (!asaas) {
+          res.status(503).json({ error: "Pagamento indisponível no momento." });
+          return;
+        }
+        const { name, email, cpfCnpj, plan } = req.body ?? {};
+        if (!name || !email || !cpfCnpj) {
+          res.status(400).json({ error: "Campos obrigatórios: name, email, cpfCnpj." });
+          return;
+        }
+
+        const value = plan === "oficial" ? 347 : 197;
+        const slug = name
+          .toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 50)
+          + "-" + randomBytes(3).toString("hex");
+
+        // 1) Create tenant (suspended until payment confirms)
+        const { accessKey } = await dir.createTenant({
+          id: slug, name, instances: ["*"], isAdmin: false,
+        });
+        await dir.updateTenant(slug, { status: "suspended" });
+
+        // 2) Create Asaas customer + subscription
+        const customer = await asaas.createCustomer({ name, cpfCnpj, email });
+        const subscription = await asaas.createSubscription({
+          customerId: customer.id,
+          value,
+          billingType: "UNDEFINED",
+          description: `Conector WhatsApp × Claude — ${plan === "oficial" ? "API Oficial" : "Padrão"}`,
+        });
+
+        // 3) Link Asaas IDs to tenant
+        await dir.updateTenant(slug, {
+          asaasCustomerId: customer.id,
+          asaasSubscriptionId: subscription.id,
+        });
+
+        // 4) Get payment link
+        const invoiceUrl = await asaas.getPaymentUrl(subscription.id);
+
+        console.log(`Checkout: tenant ${slug} created (suspended) → Asaas customer ${customer.id}`);
+        res.status(201).json({ accessKey, invoiceUrl, tenantId: slug });
+      } catch (err: any) {
+        console.error("Checkout error:", err.message);
+        res.status(400).json({ error: err.message });
+      }
+    });
 
     // Asaas payment webhook: confirmed payment reactivates the tenant,
     // overdue payment suspends it (tokens keep failing verify until then).

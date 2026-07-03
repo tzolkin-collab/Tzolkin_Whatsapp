@@ -1,0 +1,78 @@
+import axios, { AxiosInstance } from "axios";
+
+/**
+ * Minimal Asaas v3 client — only what tenant provisioning needs: create the
+ * customer, open the recurring subscription, and let the webhook (wired in
+ * index.ts) flip tenant status on payment events.
+ *
+ * ASAAS_BASE_URL defaults to production; point it at
+ * https://api-sandbox.asaas.com/v3 for testing.
+ */
+
+export interface AsaasCustomerInput {
+  name: string;
+  cpfCnpj: string;
+  email?: string;
+  mobilePhone?: string;
+}
+
+export interface AsaasSubscriptionInput {
+  customerId: string;
+  /** Monthly amount in BRL. */
+  value: number;
+  /** WEEKLY | BIWEEKLY | MONTHLY | QUARTERLY | SEMIANNUALLY | YEARLY */
+  cycle?: string;
+  /** BOLETO | CREDIT_CARD | PIX | UNDEFINED (customer chooses) */
+  billingType?: string;
+  /** yyyy-mm-dd; defaults to 7 days from now. */
+  nextDueDate?: string;
+  description?: string;
+}
+
+export class AsaasClient {
+  private http: AxiosInstance;
+
+  constructor(apiKey: string, baseUrl = process.env.ASAAS_BASE_URL || "https://api.asaas.com/v3") {
+    this.http = axios.create({
+      baseURL: baseUrl.replace(/\/+$/, ""),
+      headers: { "Content-Type": "application/json", access_token: apiKey },
+    });
+  }
+
+  async createCustomer(input: AsaasCustomerInput): Promise<{ id: string }> {
+    try {
+      const r = await this.http.post("/customers", input);
+      return r.data;
+    } catch (error: any) {
+      this.handleError("createCustomer", error);
+    }
+  }
+
+  async createSubscription(input: AsaasSubscriptionInput): Promise<{ id: string }> {
+    try {
+      const r = await this.http.post("/subscriptions", {
+        customer: input.customerId,
+        billingType: input.billingType ?? "UNDEFINED",
+        value: input.value,
+        cycle: input.cycle ?? "MONTHLY",
+        nextDueDate: input.nextDueDate ?? defaultDueDate(),
+        description: input.description ?? "Conector WhatsApp para Claude (Tzolkin)",
+      });
+      return r.data;
+    } catch (error: any) {
+      this.handleError("createSubscription", error);
+    }
+  }
+
+  private handleError(action: string, error: any): never {
+    const details = error.response?.data;
+    let msg = `Asaas error during ${action}: ${error.message}`;
+    if (details) msg += ` - ${JSON.stringify(details)}`;
+    throw new Error(msg);
+  }
+}
+
+function defaultDueDate(): string {
+  const d = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}

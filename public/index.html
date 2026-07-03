@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp no Claude — Tzolkin</title>
+  <meta name="description"
+    content="Conecte o WhatsApp da sua empresa ao Claude. Leia, responda e automatize conversas com IA — sem trocar de tela. Infraestrutura gerenciada pela Tzolkin.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --foreground: #1d1d1d;
+      --background: #ffffff;
+      --muted: #8a8a8a;
+      --border: #e8e8e8;
+      --ease-sophisticated: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: "Montserrat", system-ui, sans-serif;
+      letter-spacing: -0.02em;
+      background: var(--background);
+      color: var(--foreground);
+      line-height: 1.6;
+      overflow-x: clip;
+    }
+
+    h1,
+    h2,
+    h3,
+    .font-heading {
+      font-family: "Geist", system-ui, sans-serif;
+    }
+
+    ::selection {
+      background: var(--foreground);
+      color: var(--background);
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 28px 0;
+    }
+
+    .logo {
+      font-family: "Geist", sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .logo small {
+      color: var(--muted);
+      font-weight: 500;
+      text-transform: none;
+      letter-spacing: -0.01em;
+      margin-left: 10px;
+    }
+
+    .pill {
+      display: inline-block;
+      background: var(--foreground);
+      color: var(--background);
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 999px;
+      font-family: "Geist", sans-serif;
+      font-weight: 600;
+      font-size: 15px;
+      transition: transform .5s var(--ease-sophisticated), opacity .3s;
+    }
+
+    .pill:hover {
+      transform: scale(1.05);
+      opacity: .92;
+    }
+
+    .pill.sm {
+      padding: 10px 22px;
+      font-size: 13px;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 9vh 0 10vh;
+    }
+
+    .hero h1 {
+      font-size: clamp(56px, 11vw, 150px);
+      line-height: 0.9;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      text-transform: uppercase;
+    }
+
+    .hero h1 .l1,
+    .hero h1 .l2 {
+      display: block;
+      opacity: 0;
+      animation: slideUp .6s var(--ease-sophisticated) forwards;
+    }
+
+    .hero h1 .l2 {
+      padding-left: 10vw;
+      color: rgba(235, 123, 18, 0.87);
+      animation-delay: .08s;
+    }
+
+    .hero .sub {
+      max-width: 520px;
+      margin: 40px 0 0 auto;
+      font-size: 19px;
+      color: var(--foreground);
+      border-left: 5px solid var(--foreground);
+      padding-left: 20px;
+      opacity: 0;
+      animation: fadeIn .6s var(--ease-sophisticated) .2s forwards;
+    }
+
+    .hero .cta-row {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-top: 48px;
+      flex-wrap: wrap;
+      opacity: 0;
+      animation: fadeIn .6s var(--ease-sophisticated) .3s forwards;
+    }
+
+    .hero .cta-row .meta {
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+
+    /* Sections */
+    section {
+      padding: 88px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .kicker {
+      font-family: "Geist", sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      font-size: clamp(30px, 4.4vw, 48px);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.05;
+      margin-bottom: 16px;
+    }
+
+    .lead {
+      color: var(--muted);
+      font-size: 17px;
+      max-width: 560px;
+    }
+
+    /* Steps */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0;
+      margin-top: 56px;
+      border-top: 1px solid var(--foreground);
+    }
+
+    .step {
+      padding: 32px 28px 40px 0;
+      border-right: 1px solid var(--border);
+      padding-left: 28px;
+    }
+
+    .step:first-child {
+      padding-left: 0;
+    }
+
+    .step:last-child {
+      border-right: none;
+    }
+
+    .step .n {
+      font-family: "Geist", sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 22px;
+    }
+
+    .step h3 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .step p {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    /* Feature list — editorial rows */
+    .rows {
+      margin-top: 48px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: minmax(200px, 320px) 1fr;
+      gap: 24px;
+      padding: 26px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .row:last-child {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .row h3 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .row p {
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 560px;
+    }
+
+    @media (max-width: 640px) {
+      .row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+
+    /* Price — black band, two plans */
+    .band {
+      background: var(--foreground);
+      color: var(--background);
+      border-top: 5px solid var(--foreground);
+    }
+
+    .band section {
+      border-top: none;
+    }
+
+    .band .kicker {
+      color: rgba(255, 255, 255, .55);
+    }
+
+    .band .price-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      margin-top: 48px;
+      border-top: 1px solid rgba(255, 255, 255, .25);
+    }
+
+    @media (max-width: 760px) {
+      .band .price-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .plan {
+      padding: 40px 40px 48px 0;
+    }
+
+    .plan+.plan {
+      border-left: 1px solid rgba(255, 255, 255, .25);
+      padding-left: 40px;
+      padding-right: 0;
+    }
+
+    @media (max-width: 760px) {
+      .plan+.plan {
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, .25);
+        padding-left: 0;
+      }
+    }
+
+    .plan .plan-name {
+      font-family: "Geist", sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      color: rgba(255, 255, 255, .55);
+      margin-bottom: 18px;
+    }
+
+    .plan .valor {
+      font-family: "Geist", sans-serif;
+      font-size: clamp(48px, 6vw, 76px);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .plan .valor small {
+      font-size: 16px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, .6);
+      letter-spacing: -0.01em;
+    }
+
+    .plan .plan-sub {
+      color: rgba(255, 255, 255, .6);
+      font-size: 13.5px;
+      margin-top: 10px;
+      min-height: 2.6em;
+    }
+
+    .plan ul {
+      list-style: none;
+      margin-top: 24px;
+    }
+
+    .plan li {
+      padding: 12px 0;
+      border-top: 1px solid rgba(255, 255, 255, .15);
+      font-size: 15px;
+      color: rgba(255, 255, 255, .85);
+    }
+
+    .plan li:last-child {
+      border-bottom: 1px solid rgba(255, 255, 255, .15);
+    }
+
+    .band .pill {
+      background: var(--background);
+      color: var(--foreground);
+      margin-top: 32px;
+    }
+
+    /* FAQ */
+    details {
+      border-top: 1px solid var(--border);
+    }
+
+    details:last-of-type {
+      border-bottom: 1px solid var(--border);
+    }
+
+    summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 22px 0;
+      font-family: "Geist", sans-serif;
+      font-weight: 600;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    summary::after {
+      content: "+";
+      font-weight: 400;
+      font-size: 22px;
+      color: var(--muted);
+      transition: transform .4s var(--ease-sophisticated);
+    }
+
+    details[open] summary::after {
+      transform: rotate(45deg);
+    }
+
+    details p {
+      color: var(--muted);
+      font-size: 15px;
+      max-width: 640px;
+      padding-bottom: 24px;
+    }
+
+    /* Final CTA */
+    .final {
+      text-align: left;
+      padding: 100px 0;
+    }
+
+    .final h2 {
+      max-width: 720px;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer a {
+      color: var(--muted);
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(100%);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="wrap">
+    <header>
+      <div class="logo">Tzolkin <small>WhatsApp × Claude</small></div>
+      <a class="pill sm cta" href="#">Falar com a gente</a>
+    </header>
+
+    <div class="hero">
+      <h1>
+        <span class="l1">Seu WhatsApp</span>
+        <span class="l2">no Claude.</span>
+      </h1>
+      <p class="sub">Leia, responda e automatize as conversas do número da sua empresa direto na IA — triagem,
+        cobranças, follow-ups e resumos do dia. Sem trocar de tela, sem servidor, sem código.</p>
+      <div class="cta-row">
+        <a class="pill cta" href="#">Quero conectar meu número</a>
+        <span class="meta">Setup em ~2 minutos · nada para instalar · cancele quando quiser</span>
+      </div>
+    </div>
+  </div>
+
+  <section id="como-funciona">
+    <div class="wrap">
+      <p class="kicker">Como funciona</p>
+      <h2>Três passos.<br>Nenhum deles técnico.</h2>
+      <p class="lead">Você não precisa saber o que é API, servidor ou webhook. A infraestrutura inteira é gerenciada
+        pela Tzolkin.</p>
+      <div class="steps">
+        <div class="step">
+          <span class="n">01</span>
+          <h3>Assine e receba sua chave</h3>
+          <p>Fazemos seu cadastro e você recebe uma chave de acesso exclusiva com o link do conector. Pagamento por PIX,
+            boleto ou cartão.</p>
+        </div>
+        <div class="step">
+          <span class="n">02</span>
+          <h3>Escaneie o QR code</h3>
+          <p>Adicione o conector no seu Claude, cole a chave e escaneie o QR com o celular — igual ao WhatsApp Web.
+            Número pareado.</p>
+        </div>
+        <div class="step">
+          <span class="n">03</span>
+          <h3>Converse com o Claude</h3>
+          <p>"O que chegou no WhatsApp hoje?", "responde pro João que fechamos amanhã", "cobra os clientes em atraso". O
+            Claude faz.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="recursos">
+    <div class="wrap">
+      <p class="kicker">O que dá pra fazer</p>
+      <h2>Tudo que você já faz no WhatsApp.<br>Agora com uma IA no comando.</h2>
+      <div class="rows">
+        <div class="row">
+          <h3>Triagem inteligente</h3>
+          <p>Resumo das conversas novas, o que precisa de resposta urgente e o que pode esperar — logo de manhã, num
+            comando.</p>
+        </div>
+        <div class="row">
+          <h3>Respostas redigidas por IA</h3>
+          <p>O Claude escreve no seu tom, você aprova e ele envia. Texto, imagem, áudio ou documento.</p>
+        </div>
+        <div class="row">
+          <h3>Cobranças e follow-ups</h3>
+          <p>Mensagens de cobrança e acompanhamento de propostas na hora certa, sem constrangimento e sem esquecer
+            ninguém.</p>
+        </div>
+        <div class="row">
+          <h3>Chatbot integrado</h3>
+          <p>Fluxos automáticos de atendimento para responder fora do horário ou qualificar leads, sob seu controle.</p>
+        </div>
+        <div class="row">
+          <h3>Acesso só ao seu número</h3>
+          <p>Autorização OAuth com escopo por cliente: sua chave enxerga apenas as suas instâncias. Revogável a qualquer
+            momento.</p>
+        </div>
+        <div class="row">
+          <h3>Infraestrutura gerenciada</h3>
+          <p>Servidores, atualizações e monitoramento por nossa conta. Caiu a conexão? A gente reconecta com você.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="band">
+    <section id="preco">
+      <div class="wrap">
+        <p class="kicker">Preço</p>
+        <h2 style="color: #fff">Dois jeitos de conectar.<br>Você escolhe.</h2>
+        <div class="price-grid">
+          <div class="plan">
+            <p class="plan-name">Conexão padrão</p>
+            <div class="valor">R$ 197<small> /mês por número</small></div>
+            <p class="plan-sub">Seu número atual, pareado por QR code em 2 minutos — igual ao WhatsApp Web.</p>
+            <ul>
+              <li>Usa o WhatsApp que você já tem (normal ou Business)</li>
+              <li>Setup imediato, sem burocracia</li>
+              <li>Mensagens, mídia e histórico ilimitados</li>
+              <li>Chatbot de atendimento incluso</li>
+              <li>Sem taxa de setup, sem fidelidade</li>
+            </ul>
+            <a class="pill cta" href="#">Começar agora</a>
+          </div>
+          <div class="plan">
+            <p class="plan-name">API Oficial (Meta)</p>
+            <div class="valor">R$ 347<small> /mês por número</small></div>
+            <p class="plan-sub">WhatsApp Business Cloud API oficial da Meta — para operações que não podem parar.</p>
+            <ul>
+              <li>Integração homologada pela Meta, sem risco de bloqueio</li>
+              <li>Número verificado com selo empresarial</li>
+              <li>Ideal para volume alto e atendimento crítico</li>
+              <li>Cuidamos do cadastro na Meta com você</li>
+              <li>+ tarifas por conversa da Meta (repasse direto)</li>
+            </ul>
+            <a class="pill cta" href="#">Falar sobre a API Oficial</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section id="faq">
+    <div class="wrap">
+      <p class="kicker">Perguntas frequentes</p>
+      <h2 style="margin-bottom: 48px">Antes de você perguntar.</h2>
+      <details>
+        <summary>Qual a diferença entre a conexão padrão e a API Oficial?</summary>
+        <p>A conexão padrão pareia o número que você já tem por QR code, em 2 minutos — é a forma mais rápida e barata,
+          mas usa uma integração não-oficial, com risco (baixo, porém real) de o WhatsApp restringir o número. A API
+          Oficial usa a Cloud API da Meta: homologada, sem risco de bloqueio e com selo empresarial, mas exige cadastro
+          da empresa na Meta (a gente conduz com você) e tem tarifas por conversa cobradas pela própria Meta. Para
+          operação crítica ou volume alto, recomendamos a Oficial.</p>
+      </details>
+      <details>
+        <summary>Funciona com meu WhatsApp atual?</summary>
+        <p>Sim. Na conexão padrão, funciona com WhatsApp normal ou Business, pelo mesmo pareamento de "Aparelhos
+          conectados" que você já usa no WhatsApp Web. Seu celular continua funcionando normalmente. Na API Oficial, o
+          número passa a operar pela plataforma da Meta.</p>
+      </details>
+      <details>
+        <summary>Preciso instalar alguma coisa?</summary>
+        <p>Não. Você adiciona o conector na sua conta do Claude (claude.ai ou Claude Desktop), autoriza com a sua chave
+          e pronto. Toda a infraestrutura roda nos nossos servidores.</p>
+      </details>
+      <details>
+        <summary>Vocês leem ou guardam minhas mensagens?</summary>
+        <p>Não armazenamos suas conversas. As mensagens trafegam sob demanda, apenas quando você pede algo ao Claude, e
+          o acesso é protegido por OAuth com escopo restrito ao seu número.</p>
+      </details>
+      <details>
+        <summary>O Claude responde sozinho aos meus clientes?</summary>
+        <p>Só se você quiser. No uso padrão, o Claude redige e você aprova antes de enviar. Para atendimento automático,
+          configuramos fluxos de chatbot sob seu controle.</p>
+      </details>
+      <details>
+        <summary>E se eu quiser cancelar?</summary>
+        <p>O plano é mensal, sem fidelidade. Cancelou, desconectamos o número e revogamos o acesso na hora.</p>
+      </details>
+      <details>
+        <summary>Preciso ter conta no Claude?</summary>
+        <p>Sim — o conector funciona dentro do Claude (Anthropic). Se você ainda não usa, ajudamos a configurar no
+          onboarding.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>Pronto para colocar o WhatsApp da sua empresa no Claude?</h2>
+      <div class="cta-row" style="margin-top: 36px">
+        <a class="pill cta" href="#">Chamar a Tzolkin no WhatsApp</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap" style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; width: 100%;">
+      <span>Tzolkin — desenvolvimento web, automação e IA</span>
+      <a href="mailto:gustavosales99999@gmail.com">gustavosales99999@gmail.com</a>
+    </div>
+  </footer>
+
+  <script>
+    // Um único lugar para configurar o destino dos CTAs.
+    // TODO(Gustavo): trocar pelo número comercial da Tzolkin.
+    const WHATSAPP_NUMBER = "5500000000000";
+    const CTA_TEXT = "Oi! Quero conectar meu WhatsApp ao Claude.";
+    const url = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent(CTA_TEXT);
+    document.querySelectorAll("a.cta").forEach((a) => { a.href = url; a.target = "_blank"; a.rel = "noopener"; });
+  </script>
+
+</body>
+
+</html>

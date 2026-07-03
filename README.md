@@ -31,7 +31,50 @@ O servidor MCP precisa saber o endereço da sua Evolution API e a chave global (
    ```env
    EVOLUTION_API_URL=https://api.seudominio.com
    EVOLUTION_GLOBAL_KEY=sua-chave-global-da-evolution-api
+   PUBLIC_URL=https://seu-deploy.easypanel.host
    ```
+
+### Multi-tenant com Postgres + billing Asaas (recomendado para produção)
+
+Com `DATABASE_URL` definido, os tenants vivem no Postgres (tabelas `wa_tenants` e `wa_tokens`, criadas automaticamente) e o servidor ganha:
+
+- **Revogação de token** (`/revoke` OAuth + admin API) e **suspensão instantânea** — o escopo é resolvido no banco a cada request.
+- **API admin** (habilitada por `ADMIN_API_KEY`, header `x-admin-key`):
+  - `POST /admin/tenants` `{id, name, instances, admin?, billing?}` → cria o tenant e retorna a **chave de acesso (uma única vez)**. Com `billing: {cpfCnpj, email, value, cycle?, billingType?}` também cria o cliente + assinatura no Asaas.
+  - `GET /admin/tenants` · `PATCH /admin/tenants/:id` (instances/status/name) · `DELETE /admin/tenants/:id`
+  - `POST /admin/tenants/:id/rotate-key` · `POST /admin/tenants/:id/revoke-tokens`
+- **Webhook Asaas** em `POST /webhooks/asaas` (habilitado por `ASAAS_WEBHOOK_TOKEN`, validado contra o header `asaas-access-token` configurado no painel do Asaas): `PAYMENT_OVERDUE` suspende o tenant; `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` reativa.
+
+```env
+DATABASE_URL=postgres://user:pass@host:5432/db
+ADMIN_API_KEY=chave-admin-para-provisionar-tenants
+ASAAS_API_KEY=sua-api-key-do-asaas
+ASAAS_WEBHOOK_TOKEN=token-configurado-no-webhook-do-asaas
+# ASAAS_BASE_URL=https://api-sandbox.asaas.com/v3   (para testes)
+```
+
+Fluxo de venda: `POST /admin/tenants` com billing → manda a `accessKey` pro cliente → cliente adiciona o conector no Claude e digita a chave no consent → Asaas cobra mensalmente e o webhook mantém o status.
+
+### Multi-tenant estático (alternativa sem banco): `TENANTS_JSON`
+
+Sem `TENANTS_JSON`, o servidor opera em modo single-tenant: qualquer pessoa que autorize na tela de consent ganha acesso total (comportamento original). Com `TENANTS_JSON` definido, a tela de consent passa a exigir uma **chave de acesso**, e o token OAuth emitido fica **escopado às instâncias daquele tenant**:
+
+```env
+TENANTS_JSON={"haylander": {"key": "chave-secreta-do-cliente", "instances": ["haylander-main"]}, "admin": {"key": "chave-do-admin", "instances": "*"}}
+```
+
+- `instances: [...]` — o tenant só enxerga/opera essas instâncias. `list_instances` é filtrado; `create_instance`/`delete_instance` são negados.
+- `instances: "*"` — tenant admin, acesso total (incluindo criar/excluir instâncias).
+- Chaves devem ter 8+ caracteres. A validação é constant-time e o escopo viaja dentro do próprio token assinado (stateless — funciona com múltiplas réplicas).
+
+## 🔌 Endpoints MCP
+
+| Endpoint | Transporte | Nota |
+| :--- | :--- | :--- |
+| `/mcp` | **Streamable HTTP** | Recomendado (spec MCP atual) |
+| `/sse` + `/messages` | SSE | Legado, mantido por compatibilidade |
+
+Ambos exigem OAuth (Bearer token). O fluxo de autorização é iniciado automaticamente pelo cliente MCP (Claude, Cursor, etc.).
 
 *(Nota: Você também pode passar essas variáveis diretamente no arquivo de configuração do Claude Desktop ou Cursor, como detalhado abaixo).*
 
@@ -91,8 +134,8 @@ Este servidor exporta as seguintes ferramentas (tools) para o seu modelo de IA u
 | Categoria | Nome da Ferramenta | Descrição |
 | :--- | :--- | :--- |
 | **Instância** | `list_instances` | Lista todas as instâncias configuradas e seus status de conexão. |
-| **Instância** | `create_instance` | Cria uma nova instância de WhatsApp. |
-| **Instância** | `connect_instance` | Obtém o QR Code ou dados de emparelhamento de uma instância específica. |
+| **Instância** | `create_instance` | Cria uma nova instância de WhatsApp — `WHATSAPP-BAILEYS` (pareamento por QR do número existente) ou `WHATSAPP-BUSINESS` (Cloud API oficial da Meta; exige `token` permanente, `number` = phone number ID e `businessId` = WABA). |
+| **Instância** | `connect_instance` | Obtém o QR Code (como imagem inline) e um link `qrPageUrl` para uma página no navegador que atualiza o QR a cada 20s para escanear. |
 | **Instância** | `get_instance_status` | Verifica o status da conexão (CONNECTED, DISCONNECTED, etc.). |
 | **Instância** | `logout_instance` | Desconecta a sessão ativa do WhatsApp. |
 | **Instância** | `delete_instance` | Exclui definitivamente uma instância do servidor. |

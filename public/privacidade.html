@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Política de Privacidade — Tzolkin WhatsApp × Claude</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --foreground: #1d1d1d;
+      --background: #ffffff;
+      --muted: #8a8a8a;
+      --border: #e8e8e8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Montserrat", system-ui, sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      line-height: 1.6;
+      padding: 40px 24px;
+    }
+    h1, h2 { font-family: "Geist", system-ui, sans-serif; }
+    .wrap { max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 32px; margin-bottom: 24px; }
+    h2 { font-size: 20px; margin-top: 32px; margin-bottom: 16px; }
+    p { margin-bottom: 16px; color: #444; }
+    ul { margin-bottom: 16px; margin-left: 24px; }
+    a { color: var(--foreground); }
+    .header { margin-bottom: 60px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <a href="/">&larr; Voltar para a página inicial</a>
+    </div>
+    <h1>Política de Privacidade</h1>
+    <p>Última atualização: Julho de 2026</p>
+
+    <h2>1. Princípio Fundamental: Não armazenamos conversas</h2>
+    <p>O Conector Tzolkin funciona exclusivamente como uma ponte (proxy) técnica. Não possuímos banco de dados próprio para armazenar o histórico de mensagens, mídias ou contatos trafegados. O conteúdo do seu WhatsApp passa por nossos servidores apenas em trânsito (em tempo real) entre o WhatsApp e a Anthropic (Claude).</p>
+
+    <h2>2. Informações Coletadas</h2>
+    <p>Armazenamos estritamente os dados necessários para o provisionamento e faturamento do serviço:</p>
+    <ul>
+      <li><strong>Dados de Faturamento:</strong> Nome, E-mail, CPF/CNPJ fornecidos para emissão da cobrança no Asaas.</li>
+      <li><strong>Identificadores Técnicos:</strong> Tokens de sessão criptografados do WhatsApp, estado de conexão da instância e logs de erro operacionais anonimizados.</li>
+    </ul>
+
+    <h2>3. Acesso à IA (Anthropic)</h2>
+    <p>Quando você (ou o chatbot configurado) solicita ao Claude que leia mensagens, as últimas conversas trafegam diretamente para a API do Claude. O processamento do conteúdo das suas mensagens a partir desse momento é regido pela Política de Privacidade da Anthropic.</p>
+
+    <h2>4. Proteção da sua Chave</h2>
+    <p>O acesso ao seu conector é protegido por uma chave (Token) gerada no momento da contratação. Apenas o portador desta chave consegue enviar requisições lidas e escritas para o seu número. A custódia segura desta chave, configurada no seu Claude, é de sua responsabilidade.</p>
+
+    <h2>5. Exclusão de Dados</h2>
+    <p>Em caso de cancelamento da assinatura, a instância do WhatsApp é destruída, e todos os tokens de sessão na nossa infraestrutura são permanentemente apagados. Os dados de faturamento são mantidos no provedor de pagamento (Asaas) para fins fiscais e legais.</p>
+  </div>
+</body>
+</html>

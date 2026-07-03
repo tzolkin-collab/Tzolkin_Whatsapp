@@ -22,14 +22,18 @@
       line-height: 1.6;
       padding: 40px 24px;
     }
-    h1, h2 { font-family: "Geist", system-ui, sans-serif; }
-    .wrap { max-width: 800px; margin: 0 auto; }
-    h1 { font-size: 32px; margin-bottom: 24px; }
-    h2 { font-size: 20px; margin-top: 32px; margin-bottom: 16px; }
-    p { margin-bottom: 16px; color: #444; }
-    ul { margin-bottom: 16px; margin-left: 24px; }
-    a { color: var(--foreground); }
-    .header { margin-bottom: 60px; }
+    h1, h2 { font-family: "Geist", system-ui, sans-serif; letter-spacing: -0.025em; line-height: 1.2; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 36px; margin-bottom: 32px; font-weight: 700; }
+    h2 { font-size: 22px; margin-top: 40px; margin-bottom: 16px; font-weight: 600; }
+    p, li { color: #444; font-size: 17px; }
+    p { margin-bottom: 20px; }
+    ul { margin-bottom: 24px; margin-left: 24px; }
+    li { margin-bottom: 8px; }
+    a { color: var(--foreground); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+    a:hover { opacity: 0.7; }
+    .header { margin-bottom: 40px; }
+    .claude-brand { color: #D97757; font-weight: inherit; }
   </style>
 </head>
 <body>
@@ -41,7 +45,7 @@
     <p>Última atualização: Julho de 2026</p>
 
     <h2>1. O Serviço</h2>
-    <p>A Tzolkin provê uma infraestrutura que atua como ponte ("Conector") entre o seu número de WhatsApp e a plataforma Claude (Anthropic). Na "Conexão Padrão", o sistema utiliza a biblioteca Baileys (integração não-oficial) para espelhar a conexão via WhatsApp Web.</p>
+    <p>A Tzolkin provê uma infraestrutura que atua como ponte ("Conector") entre o seu número de WhatsApp e a plataforma <span class="claude-brand">Claude</span> (Anthropic). Na "Conexão Padrão", o sistema utiliza a biblioteca Baileys (integração não-oficial) para espelhar a conexão via WhatsApp Web.</p>
 
     <h2>2. Riscos e Responsabilidades (Disclaimer Importante)</h2>
     <p><strong>A Conexão Padrão não é homologada pela Meta.</strong> Embora usemos as melhores práticas técnicas, existe um risco intrínseco de que o WhatsApp restrinja ou bloqueie temporária ou permanentemente o número de telefone conectado, por violação das políticas da Meta contra automação não-oficial.</p>
@@ -55,8 +59,8 @@
     <h2>4. Uso Adequado</h2>
     <p>É proibido usar o Conector para envio de spam, conteúdo ilegal, ofensivo ou campanhas de marketing não solicitadas (disparos em massa), práticas que aceleram substancialmente o bloqueio pelo WhatsApp e que violam estes Termos, sujeitando a conta a suspensão imediata sem reembolso.</p>
 
-    <h2>5. Anthropic (Claude)</h2>
-    <p>O funcionamento da IA depende da disponibilidade dos serviços da Anthropic. A Tzolkin não se responsabiliza por indisponibilidades do Claude. O custo do uso da API ou da assinatura do Claude não está incluso nos nossos planos.</p>
+    <h2>5. Anthropic (<span class="claude-brand">Claude</span>)</h2>
+    <p>O funcionamento da IA depende da disponibilidade dos serviços da Anthropic. A Tzolkin não se responsabiliza por indisponibilidades do <span class="claude-brand">Claude</span>. O custo do uso da API ou da assinatura do <span class="claude-brand">Claude</span> não está incluso nos nossos planos.</p>
   </div>
 </body>
 </html>

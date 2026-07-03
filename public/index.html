@@ -410,6 +410,22 @@
       margin-top: 32px;
     }
 
+    .payment-methods {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.45);
+      font-size: 13px;
+      margin-top: 32px;
+      letter-spacing: 0.02em;
+    }
+
+    .checkout-methods {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 12px;
+      margin-top: 14px;
+      letter-spacing: 0.01em;
+    }
+
     /* FAQ */
     details {
       border-top: 1px solid var(--border);
@@ -633,6 +649,7 @@
             <a class="pill cta" href="#">Falar sobre a API Oficial</a>
           </div>
         </div>
+        <p class="payment-methods">PIX · Cartão de crédito · Boleto bancário</p>
       </div>
     </section>
   </div>
@@ -748,6 +765,7 @@
             <span id="checkout-spinner" class="spinner" hidden></span>
           </button>
           <p id="checkout-error" class="checkout-error" hidden></p>
+          <p class="checkout-methods">Pagamento via PIX, cartão ou boleto</p>
         </form>
       </div>
 

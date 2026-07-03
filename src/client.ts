@@ -2,10 +2,14 @@ import axios, { AxiosInstance } from "axios";
 
 export interface CreateInstancePayload {
   instanceName: string;
+  /** Baileys: apikey opcional da instância. Business: token permanente da Meta Cloud API (obrigatório). */
   token?: string;
+  /** Baileys: número opcional. Business: phone number ID da Meta (obrigatório). */
   number?: string;
   qrcode?: boolean;
   integration?: "WHATSAPP-BAILEYS" | "WHATSAPP-BUSINESS";
+  /** WhatsApp Business Account ID (WABA) — obrigatório para WHATSAPP-BUSINESS. */
+  businessId?: string;
 }
 
 export interface SendTextPayload {

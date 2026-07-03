@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual, randomUUID } from "crypto";
+import type { TenantDirectory } from "./tenants.js";
 import type { Response } from "express";
 import type {
   OAuthServerProvider,
@@ -45,6 +46,54 @@ import { InvalidGrantError } from "@modelcontextprotocol/sdk/server/auth/errors.
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 const AUTH_CODE_TTL_SECONDS = 5 * 60; // 5 minutes
 const DECISION_TTL_SECONDS = 10 * 60; // 10 minutes
+
+// --- Multi-tenant (optional) ----------------------------------------------
+// When TENANTS_JSON is set, the consent page additionally asks for a tenant
+// access key, and the resulting token is scoped to that tenant's instances.
+// `instances: "*"` marks an admin tenant (full access, including
+// create/delete instance). Without TENANTS_JSON everything behaves as
+// before: single-tenant, every token has full access.
+//
+// Example TENANTS_JSON:
+//   {"haylander": {"key": "s3gr3d0", "instances": ["haylander-main"]},
+//    "admin":     {"key": "outra-chave", "instances": "*"}}
+
+export type TenantConfig = { key: string; instances: "*" | string[] };
+export type TenantsConfig = Record<string, TenantConfig>;
+
+export function parseTenantsConfig(raw: string | undefined): TenantsConfig | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("TENANTS_JSON não é JSON válido.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("TENANTS_JSON deve ser um objeto { tenantId: { key, instances } }.");
+  }
+  for (const [id, cfg] of Object.entries(parsed as Record<string, any>)) {
+    if (typeof cfg?.key !== "string" || cfg.key.length < 8) {
+      throw new Error(`TENANTS_JSON: tenant "${id}" precisa de uma "key" string com 8+ caracteres.`);
+    }
+    if (cfg.instances !== "*" && !(Array.isArray(cfg.instances) && cfg.instances.every((i: any) => typeof i === "string"))) {
+      throw new Error(`TENANTS_JSON: tenant "${id}" precisa de "instances" = "*" ou array de nomes.`);
+    }
+  }
+  return parsed as TenantsConfig;
+}
+
+/** Constant-time string comparison that doesn't leak length differences. */
+export function safeEqualStrings(a: string, b: string): boolean {
+  const ha = createHmac("sha256", getSecret()).update(a).digest();
+  const hb = createHmac("sha256", getSecret()).update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+/** Keyed hash for secrets at rest (tenant access keys in Postgres). */
+export function hashSecretString(s: string): string {
+  return createHmac("sha256", getSecret()).update(s).digest("hex");
+}
 
 function getSecret(): Buffer {
   const globalKey = process.env.EVOLUTION_GLOBAL_KEY || "";
@@ -144,6 +193,8 @@ type CodePayload = {
   scopes: string[];
   resource?: string;
   exp: number;
+  tenantId?: string;
+  instances?: "*" | string[];
 };
 
 type AccessTokenPayload = {
@@ -152,13 +203,19 @@ type AccessTokenPayload = {
   scopes: string[];
   resource?: string;
   exp: number;
+  tenantId?: string;
+  instances?: "*" | string[];
+  /** Present when a TenantDirectory records tokens — enables revocation. */
+  jti?: string;
 };
 
 export class WhatsAppOAuthProvider implements OAuthServerProvider {
   readonly clientsStore: OAuthRegisteredClientsStore;
+  private readonly directory: TenantDirectory | null;
 
-  constructor(clientsStore: OAuthRegisteredClientsStore) {
+  constructor(clientsStore: OAuthRegisteredClientsStore, directory: TenantDirectory | null = null) {
     this.clientsStore = clientsStore;
+    this.directory = directory;
   }
 
   // Renders a one-button consent page instead of auto-approving. There's no
@@ -183,6 +240,14 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
     } satisfies DecisionPayload);
 
     const appName = client.client_name || client.client_id;
+    // In multi-tenant mode the consent page doubles as the login step: the
+    // tenant access key typed here decides which instances the token can
+    // touch. Without tenants configured there is nothing to type — one
+    // click, full access, as before.
+    const tenantField = this.directory?.requiresKey
+      ? `<label for="tenantKey">Chave de acesso do tenant</label>
+      <input type="password" id="tenantKey" name="tenantKey" required autocomplete="off" placeholder="Chave fornecida pela Tzolkin">`
+      : "";
     res.set("Content-Type", "text/html; charset=utf-8").send(`<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -193,6 +258,8 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
   .card { background: #fff; border-radius: 12px; padding: 32px; max-width: 420px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
   h1 { font-size: 18px; margin: 0 0 8px; }
   p { color: #555; font-size: 14px; line-height: 1.5; }
+  label { display: block; font-size: 13px; color: #333; margin: 16px 0 4px; }
+  input[type="password"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
   .actions { display: flex; gap: 12px; margin-top: 24px; }
   button { flex: 1; padding: 10px 16px; border-radius: 8px; border: none; font-size: 14px; cursor: pointer; }
   .allow { background: #16a766; color: #fff; }
@@ -205,6 +272,7 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
     <p><strong>${escapeHtml(appName)}</strong> está pedindo acesso ao servidor MCP do WhatsApp (Evolution API) — list_instances, send_text, send_media e demais ferramentas.</p>
     <form method="POST" action="/authorize/decision">
       <input type="hidden" name="decisionToken" value="${decisionToken}">
+      ${tenantField}
       <div class="actions">
         <button class="deny" name="decision" value="deny" type="submit">Negar</button>
         <button class="allow" name="decision" value="allow" type="submit">Autorizar</button>
@@ -217,7 +285,11 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
 
   // Called by the POST /authorize/decision route (wired up in index.ts,
   // outside the SDK's router) once the user clicks Allow/Deny.
-  resolveDecision(decisionToken: string, allow: boolean): { redirectUrl: string } {
+  async resolveDecision(
+    decisionToken: string,
+    allow: boolean,
+    tenantKey?: string
+  ): Promise<{ redirectUrl: string }> {
     let decision: DecisionPayload;
     try {
       decision = unsign<DecisionPayload>(decisionToken);
@@ -243,6 +315,20 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
       return { redirectUrl: redirect.toString() };
     }
 
+    // Multi-tenant mode: the access key typed on the consent page picks the
+    // tenant. Validated here (not on authorize) so a wrong key never mints
+    // a code. Denials above don't need a key.
+    let tenantId: string | undefined;
+    let instances: "*" | string[] | undefined;
+    if (this.directory) {
+      const scope = await this.directory.validateKey(tenantKey);
+      if (!scope) {
+        throw new Error("Chave de acesso inválida — confira a chave do seu tenant e tente de novo.");
+      }
+      tenantId = scope.tenantId;
+      instances = scope.instances;
+    }
+
     const code = sign({
       kind: "code",
       clientId: decision.clientId,
@@ -251,6 +337,8 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
       scopes: decision.scopes,
       resource: decision.resource,
       exp: nowSeconds() + AUTH_CODE_TTL_SECONDS,
+      tenantId,
+      instances,
     } satisfies CodePayload);
 
     redirect.searchParams.set("code", code);
@@ -277,12 +365,26 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
       throw new InvalidGrantError("redirect_uri não bate com o usado na autorização");
     }
 
+    const exp = nowSeconds() + ACCESS_TOKEN_TTL_SECONDS;
+
+    // With a directory, every token gets a jti recorded at mint time so it
+    // can be revoked and so DB-backed scope stays live (suspend a tenant →
+    // its tokens stop working on the next request).
+    let jti: string | undefined;
+    if (this.directory && entry.tenantId) {
+      jti = randomUUID();
+      await this.directory.registerToken(jti, entry.tenantId, client.client_id, exp);
+    }
+
     const accessToken = sign({
       kind: "access",
       clientId: client.client_id,
       scopes: entry.scopes,
       resource: (resource ?? entry.resource)?.toString(),
-      exp: nowSeconds() + ACCESS_TOKEN_TTL_SECONDS,
+      exp,
+      tenantId: entry.tenantId,
+      instances: entry.instances,
+      jti,
     } satisfies AccessTokenPayload);
 
     return {
@@ -310,19 +412,49 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
     if (entry.kind !== "access" || entry.exp < nowSeconds()) {
       throw new InvalidGrantError("Access token expirado — reautorize");
     }
+
+    // With a directory the scope is resolved live (DB mode: revocation +
+    // suspension + instance edits apply immediately; env mode: echoes the
+    // scope baked into the token).
+    let extra: Record<string, unknown> | undefined;
+    if (this.directory) {
+      let scope;
+      try {
+        scope = await this.directory.resolveTokenScope(entry);
+      } catch (err: any) {
+        throw new InvalidGrantError(err.message || "Token sem tenant válido — reautorize");
+      }
+      extra = { tenantId: scope.tenantId, instances: scope.instances };
+    }
+
     return {
       token,
       clientId: entry.clientId,
       scopes: entry.scopes,
       expiresAt: entry.exp,
       resource: entry.resource ? new URL(entry.resource) : undefined,
+      // Tool handlers read this to scope instance access per tenant.
+      extra,
     };
   }
 
-  // No revokeToken: tokens are stateless (self-verifying signatures), so
-  // there's nothing server-side to delete. They simply expire after 90
-  // days. Leaving this unimplemented (it's optional on the interface)
-  // means the SDK's router won't advertise a /revoke endpoint at all.
+  // RFC 7009: revocation always "succeeds" — unknown/foreign tokens are
+  // silently ignored. Only DB-backed directories can actually kill a token
+  // (env-mode tokens are stateless and just expire).
+  async revokeToken(
+    _client: OAuthClientInformationFull,
+    request: { token: string }
+  ): Promise<void> {
+    if (!this.directory) return;
+    try {
+      const entry = unsign<AccessTokenPayload>(request.token);
+      if (entry.kind === "access") {
+        await this.directory.revokeToken(entry);
+      }
+    } catch {
+      // Invalid/foreign token: nothing to revoke.
+    }
+  }
 
   private decodeCode(code: string, expectedClientId: string): CodePayload {
     let entry: CodePayload;
@@ -341,6 +473,38 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
   }
 }
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// --- QR pairing links ------------------------------------------------------
+// connect_instance hands out a short-lived signed link to a browser page
+// that renders (and auto-refreshes) the pairing QR. The link is its own
+// bearer credential — same stateless HMAC scheme as everything above, so it
+// works across replicas and restarts with no storage.
+
+const QR_LINK_TTL_SECONDS = 10 * 60;
+
+type QrLinkPayload = { kind: "qr"; instanceName: string; exp: number };
+
+export function createQrLinkToken(instanceName: string): string {
+  return sign({
+    kind: "qr",
+    instanceName,
+    exp: nowSeconds() + QR_LINK_TTL_SECONDS,
+  } satisfies QrLinkPayload);
+}
+
+/** Returns the instanceName the link was minted for. Throws if invalid or expired. */
+export function verifyQrLinkToken(token: string): string {
+  let payload: QrLinkPayload;
+  try {
+    payload = unsign<QrLinkPayload>(token);
+  } catch {
+    throw new Error("Link de QR inválido — rode connect_instance de novo para gerar outro.");
+  }
+  if (payload.kind !== "qr" || payload.exp < nowSeconds()) {
+    throw new Error("Link de QR expirado — rode connect_instance de novo para gerar outro.");
+  }
+  return payload.instanceName;
 }

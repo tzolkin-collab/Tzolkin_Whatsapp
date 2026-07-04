@@ -55,6 +55,26 @@ ASAAS_WEBHOOK_TOKEN=token-configurado-no-webhook-do-asaas
 
 Fluxo de venda: `POST /admin/tenants` com billing → manda a `accessKey` pro cliente → cliente adiciona o conector no Claude e digita a chave no consent → Asaas cobra mensalmente e o webhook mantém o status.
 
+### Créditos do chatbot (Typebot hospedado)
+
+**Modelo:** 1 crédito = 1 sessão de chatbot iniciada (evento `TYPEBOT_START` da Evolution). Ledger append-only em `wa_credit_ledger` (idempotente por `ref`).
+
+- **Medição:** configure o webhook das instâncias para `POST <PUBLIC_URL>/webhooks/evolution?token=<EVOLUTION_WEBHOOK_TOKEN>` com o evento `TYPEBOT_START`. Cada sessão debita 1 crédito do tenant dono da instância; **sem saldo, a sessão é encerrada na hora** (`changeTypebotStatus closed`).
+- **Compra:** `POST /api/client/credits/checkout {packId}` cria cobrança avulsa no Asaas com `externalReference: credits:<tenantId>:<qty>`; o webhook do Asaas credita o ledger ao confirmar (idempotente entre `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED`).
+- **Painel:** `GET /api/client/credits` → `{balance, history, packs}`. Admin: `GET/POST /admin/tenants/:id/credits` (ajuste manual ±).
+- **Envs:** `EVOLUTION_WEBHOOK_TOKEN` (habilita a medição), `CREDIT_PACKS_JSON` (default: 100/R$49, 500/R$199, 2000/R$599), `WELCOME_CREDITS` (default 20, creditados no checkout).
+
+### API da aba Typebot (`/api/client`, Bearer = chave de acesso)
+
+| Rota | Ação |
+| :--- | :--- |
+| `GET /instances/:name/typebot` | Fluxos vinculados + defaults da instância |
+| `PUT /instances/:name/typebot` | Cria (sem `typebotId`) ou atualiza (com `typebotId`) fluxo — aceita gatilhos (`triggerType/Operator/Value`) e comportamento (`expire`, `keywordFinish`, `delayMessage`, `unknownMessage`, `keepOpen`, `stopBotFromMe`, `debounceTime`) |
+| `DELETE /instances/:name/typebot/:typebotId` | Remove o fluxo |
+| `GET /instances/:name/typebot/:typebotId/sessions` | Sessões em andamento |
+| `POST /instances/:name/typebot/sessions/:remoteJid` | `{status: opened\|paused\|closed}` |
+| `POST /instances/:name/typebot/test` | `{number, url, typebot}` — dispara o fluxo para um número |
+
 ### Multi-tenant estático (alternativa sem banco): `TENANTS_JSON`
 
 Sem `TENANTS_JSON`, o servidor opera em modo single-tenant: qualquer pessoa que autorize na tela de consent ganha acesso total (comportamento original). Com `TENANTS_JSON` definido, a tela de consent passa a exigir uma **chave de acesso**, e o token OAuth emitido fica **escopado às instâncias daquele tenant**:

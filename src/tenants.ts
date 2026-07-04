@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import type pg from "pg";
 import { hashSecretString, safeEqualStrings, type TenantsConfig } from "./auth.js";
 
@@ -120,6 +120,19 @@ export class DbTenantDirectory implements TenantDirectory {
         client_id TEXT,
         expires_at TIMESTAMPTZ NOT NULL,
         revoked BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    // Créditos do chatbot: ledger append-only (saldo = SUM(delta)). `ref`
+    // marca lançamentos idempotentes (id do pagamento Asaas, sessionId do
+    // Typebot) — o mesmo ref nunca credita/debita duas vezes.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wa_credit_ledger (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        delta INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        ref TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
@@ -258,4 +271,106 @@ export class DbTenantDirectory implements TenantDirectory {
     );
     return r.rows[0]?.id ?? null;
   }
+
+  async getTenantById(id: string): Promise<TenantRecord | null> {
+    const r = await this.pool.query(
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+         FROM wa_tenants WHERE id = $1`,
+      [id]
+    );
+    const row = r.rows[0];
+    if (!row) return null;
+    return {
+      ...row,
+      instances: row.is_admin ? "*" : row.instances,
+    };
+  }
+
+  async getTenantByAccessKey(accessKey: string): Promise<TenantRecord | null> {
+    const hash = hashSecretString(accessKey);
+    const r = await this.pool.query(
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+         FROM wa_tenants WHERE access_key_hash = $1`,
+      [hash]
+    );
+    const row = r.rows[0];
+    if (!row) return null;
+    return {
+      ...row,
+      instances: row.is_admin ? "*" : row.instances,
+    };
+  }
+
+  async getTenantTokens(tenantId: string): Promise<Array<{ jti: string; clientId: string; expiresAt: Date; revoked: boolean }>> {
+    const r = await this.pool.query(
+      `SELECT jti, client_id as "clientId", expires_at as "expiresAt", revoked
+         FROM wa_tokens WHERE tenant_id = $1 ORDER BY expires_at DESC`,
+      [tenantId]
+    );
+    return r.rows.map(row => ({
+      jti: row.jti,
+      clientId: row.clientId || "Desconhecido",
+      expiresAt: new Date(row.expiresAt),
+      revoked: row.revoked,
+    }));
+  }
+
+  // --- Créditos do chatbot ----------------------------------------------------
+
+  /**
+   * Lança créditos (delta > 0) ou débito (delta < 0). Com `ref`, o
+   * lançamento é idempotente: se o ref já existe no ledger, nada é gravado
+   * e retorna false (protege contra retries de webhook do Asaas/Evolution).
+   */
+  async addCredits(tenantId: string, delta: number, reason: string, ref: string | null = null): Promise<boolean> {
+    if (!Number.isInteger(delta) || delta === 0) {
+      throw new Error("delta de créditos deve ser um inteiro diferente de zero.");
+    }
+    if (ref) {
+      const dup = await this.pool.query(`SELECT 1 FROM wa_credit_ledger WHERE ref = $1`, [ref]);
+      if (dup.rows.length > 0) return false;
+    }
+    await this.pool.query(
+      `INSERT INTO wa_credit_ledger (id, tenant_id, delta, reason, ref) VALUES ($1, $2, $3, $4, $5)`,
+      [randomUUID(), tenantId, delta, reason, ref]
+    );
+    return true;
+  }
+
+  async getCreditBalance(tenantId: string): Promise<number> {
+    const r = await this.pool.query(
+      `SELECT COALESCE(SUM(delta), 0) AS balance FROM wa_credit_ledger WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    return Number(r.rows[0]?.balance ?? 0);
+  }
+
+  async getCreditHistory(tenantId: string, limit = 50): Promise<Array<{ delta: number; reason: string; ref: string | null; created_at: Date }>> {
+    const r = await this.pool.query(
+      `SELECT delta, reason, ref, created_at FROM wa_credit_ledger
+        WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [tenantId, limit]
+    );
+    return r.rows;
+  }
+
+  /**
+   * Localiza o tenant dono de uma instância (para webhooks da Evolution,
+   * que identificam apenas o instanceName). Tenants admin ("*") não contam
+   * como donos. Varredura em JS — adequado à escala atual; trocar por
+   * consulta JSONB quando a base crescer.
+   */
+  async findTenantByInstance(instanceName: string): Promise<TenantRecord | null> {
+    const r = await this.pool.query(
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+         FROM wa_tenants WHERE is_admin = FALSE`
+    );
+    for (const row of r.rows) {
+      if (Array.isArray(row.instances) && row.instances.includes(instanceName)) {
+        return { ...row, instances: row.instances };
+      }
+    }
+    return null;
+  }
 }
+

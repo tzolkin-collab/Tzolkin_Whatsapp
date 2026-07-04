@@ -448,6 +448,34 @@ function createServer(): McpServer {
   return server;
 }
 
+// --- Créditos do chatbot -----------------------------------------------------
+// Modelo: 1 crédito = 1 sessão de chatbot iniciada (evento TYPEBOT_START da
+// Evolution). Pacotes vendidos como cobrança avulsa no Asaas; o webhook de
+// pagamento credita o ledger. Sem saldo, novas sessões são encerradas.
+
+type CreditPack = { id: string; credits: number; price: number };
+
+function creditPacks(): CreditPack[] {
+  const raw = process.env.CREDIT_PACKS_JSON;
+  if (!raw) {
+    return [
+      { id: "p100", credits: 100, price: 49 },
+      { id: "p500", credits: 500, price: 199 },
+      { id: "p2000", credits: 2000, price: 599 },
+    ];
+  }
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed) || parsed.some((p) => !p?.id || !Number.isInteger(p?.credits) || typeof p?.price !== "number")) {
+    throw new Error('CREDIT_PACKS_JSON deve ser um array [{"id","credits","price"}].');
+  }
+  return parsed as CreditPack[];
+}
+
+function welcomeCredits(): number {
+  const n = parseInt(process.env.WELCOME_CREDITS ?? "20", 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 // Builds the Express app for a given tenant directory. Exported so tests
 // can wire an in-memory Postgres (pg-mem) without touching the network env.
 export function createApp(dir: TenantDirectory | null): express.Express {
@@ -847,6 +875,29 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         }
       });
 
+      admin.get("/tenants/:id/credits", async (req, res) => {
+        try {
+          const [balance, history] = await Promise.all([
+            dir.getCreditBalance(req.params.id),
+            dir.getCreditHistory(req.params.id),
+          ]);
+          res.json({ id: req.params.id, balance, history });
+        } catch (err: any) {
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      // Ajuste manual de créditos (cortesia, estorno): delta positivo ou negativo.
+      admin.post("/tenants/:id/credits", async (req, res) => {
+        try {
+          const { credits, reason } = req.body ?? {};
+          await dir.addCredits(req.params.id, credits, reason || "ajuste manual (admin)");
+          res.json({ id: req.params.id, balance: await dir.getCreditBalance(req.params.id) });
+        } catch (err: any) {
+          res.status(400).json({ error: err.message });
+        }
+      });
+
       app.use("/admin", admin);
     }
 
@@ -864,8 +915,35 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         }
         try {
           const event = req.body?.event as string | undefined;
-          const customerId =
-            req.body?.payment?.customer ?? req.body?.subscription?.customer;
+          const payment = req.body?.payment;
+
+          // Compra de créditos: pagamentos avulsos carregam
+          // externalReference "credits:<tenantId>:<qty>". Idempotente pelo
+          // id do pagamento — PAYMENT_CONFIRMED + PAYMENT_RECEIVED (o Asaas
+          // manda os dois) não creditam duas vezes. Não mexe no status do
+          // tenant: crédito não reativa assinatura em atraso.
+          const extRef = payment?.externalReference;
+          if (
+            (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") &&
+            typeof extRef === "string" &&
+            extRef.startsWith("credits:")
+          ) {
+            const [, creditTenantId, qtyRaw] = extRef.split(":");
+            const qty = parseInt(qtyRaw, 10);
+            if (creditTenantId && Number.isInteger(qty) && qty > 0) {
+              const credited = await dir.addCredits(
+                creditTenantId,
+                qty,
+                "compra de pacote de créditos",
+                `asaas-payment:${payment?.id ?? extRef}`
+              );
+              if (credited) console.log(`Asaas webhook: +${qty} créditos → tenant ${creditTenantId}`);
+            }
+            res.json({ received: true });
+            return;
+          }
+
+          const customerId = payment?.customer ?? req.body?.subscription?.customer;
           let tenantId: string | null = null;
           if (typeof customerId === "string" && event) {
             if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
@@ -875,6 +953,55 @@ export function createApp(dir: TenantDirectory | null): express.Express {
             }
           }
           if (tenantId) console.log(`Asaas webhook: ${event} → tenant ${tenantId}`);
+          res.json({ received: true });
+        } catch (err: any) {
+          res.status(500).json({ error: err.message });
+        }
+      });
+    }
+
+    // Webhook da Evolution (medição de créditos): aponte o webhook das
+    // instâncias para <PUBLIC_URL>/webhooks/evolution?token=<EVOLUTION_WEBHOOK_TOKEN>
+    // com o evento TYPEBOT_START habilitado. Cada sessão de chatbot iniciada
+    // debita 1 crédito do tenant dono da instância; sem saldo, a sessão é
+    // encerrada imediatamente.
+    const evoWebhookToken = process.env.EVOLUTION_WEBHOOK_TOKEN;
+    if (evoWebhookToken) {
+      app.post("/webhooks/evolution", express.json(), async (req, res) => {
+        const got = (req.query.token as string) || "";
+        if (!safeEqualStrings(got, evoWebhookToken)) {
+          res.status(401).json({ error: "invalid webhook token" });
+          return;
+        }
+        try {
+          // A Evolution entrega "typebot.start"; a config usa TYPEBOT_START.
+          const event = String(req.body?.event ?? "").toUpperCase().replace(/\./g, "_");
+          const instanceName = req.body?.instance ?? req.body?.instanceName;
+          if (event === "TYPEBOT_START" && typeof instanceName === "string") {
+            const tenant = await dir.findTenantByInstance(instanceName);
+            if (tenant) {
+              const data = req.body?.data ?? {};
+              const remoteJid = data.remoteJid ?? data.key?.remoteJid;
+              const sessionRef = data.sessionId
+                ? `typebot-session:${instanceName}:${data.sessionId}`
+                : null;
+              const balance = await dir.getCreditBalance(tenant.id);
+              if (balance <= 0) {
+                if (typeof remoteJid === "string") {
+                  try {
+                    await client.changeTypebotStatus(instanceName, { remoteJid, status: "closed" });
+                  } catch {
+                    // Evolution indisponível não pode derrubar o webhook.
+                  }
+                }
+                console.log(
+                  `Créditos esgotados: sessão de chatbot bloqueada (tenant ${tenant.id}, instância ${instanceName})`
+                );
+              } else {
+                await dir.addCredits(tenant.id, -1, "sessão de chatbot iniciada", sessionRef);
+              }
+            }
+          }
           res.json({ received: true });
         } catch (err: any) {
           res.status(500).json({ error: err.message });
@@ -936,6 +1063,10 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         });
         accessKey = resDb.accessKey;
         await dbDir.updateTenant(slug, { status: "suspended" });
+        const welcome = welcomeCredits();
+        if (welcome > 0) {
+          await dbDir.addCredits(slug, welcome, "créditos de boas-vindas");
+        }
       }
 
       // 2) Create Asaas customer + subscription
@@ -1227,6 +1358,233 @@ export function createApp(dir: TenantDirectory | null): express.Express {
 
       await client.configureTypebot(name, payload);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Instância pertence ao tenant do painel?
+  const clientOwnsInstance = (tenant: any, name: string): boolean =>
+    tenant.instances === "*" ||
+    (Array.isArray(tenant.instances) && tenant.instances.includes(name));
+
+  // --- Créditos do chatbot (painel do cliente) --------------------------------
+
+  clientRouter.get("/credits", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const packs = creditPacks();
+      if (!(dir instanceof DbTenantDirectory)) {
+        // Mock local para desenvolvimento da UI sem banco
+        res.json({ balance: 100, history: [], packs });
+        return;
+      }
+      const [balance, history] = await Promise.all([
+        dir.getCreditBalance(tenant.id),
+        dir.getCreditHistory(tenant.id),
+      ]);
+      res.json({ balance, history, packs });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  clientRouter.post("/credits/checkout", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { packId } = req.body ?? {};
+      const pack = creditPacks().find((p) => p.id === packId);
+      if (!pack) {
+        res.status(400).json({ error: "Pacote de créditos inválido." });
+        return;
+      }
+
+      const asaasKey = process.env.ASAAS_API_KEY;
+      if (!(dir instanceof DbTenantDirectory) || !asaasKey) {
+        res.json({ invoiceUrl: "https://sandbox.asaas.com/pay/mock-credits", pack });
+        return;
+      }
+      if (!tenant.asaas_customer_id) {
+        res.status(400).json({ error: "Tenant sem cadastro de cobrança no Asaas — fale com o suporte." });
+        return;
+      }
+
+      const asaas = new AsaasClient(asaasKey);
+      const payment = await asaas.createPayment({
+        customerId: tenant.asaas_customer_id,
+        value: pack.price,
+        description: `Pacote de ${pack.credits} créditos de chatbot — Tzolkin`,
+        // O webhook do Asaas lê este formato para creditar o ledger.
+        externalReference: `credits:${tenant.id}:${pack.credits}`,
+      });
+      res.json({ invoiceUrl: payment.invoiceUrl ?? null, pack });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Aba Typebot (painel do cliente) -----------------------------------------
+
+  // Visão completa: fluxos vinculados + defaults da instância.
+  clientRouter.get("/instances/:name/typebot", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      let flows: any = [];
+      let defaults: any = null;
+      try {
+        flows = await client.listTypebots(name);
+      } catch {
+        // Instância sem typebot configurado retorna erro na Evolution — trata como vazio.
+      }
+      try {
+        defaults = await client.getTypebotSettings(name);
+      } catch {
+        // idem
+      }
+      res.json({ flows: Array.isArray(flows) ? flows : [], defaults });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Cria (sem typebotId) ou atualiza (com typebotId) um fluxo.
+  clientRouter.put("/instances/:name/typebot", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      const {
+        typebotId,
+        enabled,
+        url,
+        typebot,
+        triggerType,
+        triggerOperator,
+        triggerValue,
+        expire,
+        keywordFinish,
+        delayMessage,
+        unknownMessage,
+        listeningFromMe,
+        stopBotFromMe,
+        keepOpen,
+        debounceTime,
+      } = req.body ?? {};
+
+      if (enabled && (!url || !typebot)) {
+        res.status(400).json({ error: "URL e fluxo do Typebot são obrigatórios ao ativar." });
+        return;
+      }
+      if (triggerType === "keyword" && !triggerValue) {
+        res.status(400).json({ error: "Gatilho por palavra-chave exige triggerValue." });
+        return;
+      }
+
+      const payload = {
+        enabled: enabled === true,
+        url: url || "",
+        typebot: typebot || "",
+        triggerType,
+        triggerOperator,
+        triggerValue,
+        expire,
+        keywordFinish,
+        delayMessage,
+        unknownMessage,
+        listeningFromMe: listeningFromMe === true,
+        stopBotFromMe: stopBotFromMe !== false,
+        keepOpen,
+        debounceTime,
+      };
+
+      const result = typebotId
+        ? await client.updateTypebot(name, typebotId, payload)
+        : await client.configureTypebot(name, payload);
+      res.json({ success: true, result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  clientRouter.delete("/instances/:name/typebot/:typebotId", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name, typebotId } = req.params;
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      await client.deleteTypebot(name, typebotId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sessões em andamento de um fluxo (contato, status, início).
+  clientRouter.get("/instances/:name/typebot/:typebotId/sessions", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name, typebotId } = req.params;
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      const sessions = await client.fetchTypebotSessions(name, typebotId);
+      res.json({ sessions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Pausar/encerrar/reabrir a sessão do bot para um contato específico.
+  clientRouter.post("/instances/:name/typebot/sessions/:remoteJid", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name, remoteJid } = req.params;
+      const { status } = req.body ?? {};
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      if (!["opened", "paused", "closed"].includes(status)) {
+        res.status(400).json({ error: "status deve ser opened, paused ou closed." });
+        return;
+      }
+      await client.changeTypebotStatus(name, { remoteJid, status });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Disparo de teste: inicia o fluxo para um número (valida a config na hora).
+  clientRouter.post("/instances/:name/typebot/test", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      const { number, url, typebot } = req.body ?? {};
+      if (!clientOwnsInstance(tenant, name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+      if (!number || !url || !typebot) {
+        res.status(400).json({ error: "Campos obrigatórios: number, url, typebot." });
+        return;
+      }
+      const remoteJid = String(number).includes("@")
+        ? String(number)
+        : `${String(number).replace(/\D/g, "")}@s.whatsapp.net`;
+      await client.startTypebotFlow(name, { url, typebot, remoteJid, startSession: true });
+      res.json({ success: true, remoteJid });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

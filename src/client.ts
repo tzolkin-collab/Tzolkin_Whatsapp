@@ -47,6 +47,11 @@ export interface ConfigureTypebotPayload {
   listeningFromMe?: boolean;
   stopBotFromMe?: boolean;
   keepOpen?: boolean;
+  debounceTime?: number;
+  /** Gatilho do fluxo (Evolution v2 suporta vários bots por instância). */
+  triggerType?: "keyword" | "all" | "none" | "advanced";
+  triggerOperator?: "contains" | "equals" | "startsWith" | "endsWith" | "regex";
+  triggerValue?: string;
 }
 
 export interface TypebotChangeStatusPayload {
@@ -210,6 +215,54 @@ export class EvolutionClient {
       return response.data;
     } catch (error: any) {
       this.handleError("getTypebotSettings", error);
+    }
+  }
+
+  /** Lista os fluxos (typebots) vinculados à instância — v2 suporta vários, com gatilhos. */
+  async listTypebots(instanceName: string) {
+    try {
+      const response = await this.axiosInstance.get(`/typebot/find/${instanceName}`);
+      return response.data;
+    } catch (error: any) {
+      this.handleError("listTypebots", error);
+    }
+  }
+
+  async updateTypebot(instanceName: string, typebotId: string, payload: ConfigureTypebotPayload) {
+    try {
+      const response = await this.axiosInstance.put(`/typebot/update/${typebotId}/${instanceName}`, payload);
+      return response.data;
+    } catch (error: any) {
+      this.handleError("updateTypebot", error);
+    }
+  }
+
+  async deleteTypebot(instanceName: string, typebotId: string) {
+    try {
+      const response = await this.axiosInstance.delete(`/typebot/delete/${typebotId}/${instanceName}`);
+      return response.data;
+    } catch (error: any) {
+      this.handleError("deleteTypebot", error);
+    }
+  }
+
+  /** Sessões de conversa em andamento com um fluxo específico. */
+  async fetchTypebotSessions(instanceName: string, typebotId: string) {
+    try {
+      const response = await this.axiosInstance.get(`/typebot/fetchSessions/${typebotId}/${instanceName}`);
+      return response.data;
+    } catch (error: any) {
+      this.handleError("fetchTypebotSessions", error);
+    }
+  }
+
+  /** Defaults da instância (expire, keywordFinish, delayMessage etc). */
+  async setTypebotDefaults(instanceName: string, payload: Omit<ConfigureTypebotPayload, "url" | "typebot" | "triggerType" | "triggerOperator" | "triggerValue">) {
+    try {
+      const response = await this.axiosInstance.post(`/typebot/settings/${instanceName}`, payload);
+      return response.data;
+    } catch (error: any) {
+      this.handleError("setTypebotDefaults", error);
     }
   }
 

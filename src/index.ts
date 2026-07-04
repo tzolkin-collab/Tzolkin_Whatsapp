@@ -13,6 +13,7 @@ import express from "express";
 import { z } from "zod";
 import dotenv from "dotenv";
 import pg from "pg";
+import fs from "fs";
 import { EvolutionClient } from "./client.js";
 import {
   StatelessClientsStore,
@@ -31,6 +32,10 @@ import {
 import { AsaasClient } from "./asaas.js";
 
 // Load environment variables for local testing
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+}
 dotenv.config();
 
 const apiUrl = process.env.EVOLUTION_API_URL;
@@ -845,66 +850,6 @@ export function createApp(dir: TenantDirectory | null): express.Express {
       app.use("/admin", admin);
     }
 
-    // --- Public self-service checkout ------------------------------------------
-    const checkoutLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 5,
-      message: { error: "Muitas tentativas. Aguarde 15 minutos." },
-    });
-
-    app.post("/api/checkout", checkoutLimiter, express.json(), async (req, res) => {
-      try {
-        if (!asaas) {
-          res.status(503).json({ error: "Pagamento indisponível no momento." });
-          return;
-        }
-        const { name, email, cpfCnpj, plan } = req.body ?? {};
-        if (!name || !email || !cpfCnpj) {
-          res.status(400).json({ error: "Campos obrigatórios: name, email, cpfCnpj." });
-          return;
-        }
-
-        const value = plan === "oficial" ? 347 : 197;
-        const slug = name
-          .toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 50)
-          + "-" + randomBytes(3).toString("hex");
-
-        // 1) Create tenant (suspended until payment confirms)
-        const { accessKey } = await dir.createTenant({
-          id: slug, name, instances: ["*"], isAdmin: false,
-        });
-        await dir.updateTenant(slug, { status: "suspended" });
-
-        // 2) Create Asaas customer + subscription
-        const customer = await asaas.createCustomer({ name, cpfCnpj, email });
-        const subscription = await asaas.createSubscription({
-          customerId: customer.id,
-          value,
-          billingType: "UNDEFINED",
-          description: `Conector WhatsApp × Claude — ${plan === "oficial" ? "API Oficial" : "Padrão"}`,
-        });
-
-        // 3) Link Asaas IDs to tenant
-        await dir.updateTenant(slug, {
-          asaasCustomerId: customer.id,
-          asaasSubscriptionId: subscription.id,
-        });
-
-        // 4) Get payment link
-        const invoiceUrl = await asaas.getPaymentUrl(subscription.id);
-
-        console.log(`Checkout: tenant ${slug} created (suspended) → Asaas customer ${customer.id}`);
-        res.status(201).json({ accessKey, invoiceUrl, tenantId: slug });
-      } catch (err: any) {
-        console.error("Checkout error:", err.message);
-        res.status(400).json({ error: err.message });
-      }
-    });
-
     // Asaas payment webhook: confirmed payment reactivates the tenant,
     // overdue payment suspends it (tokens keep failing verify until then).
     // Configure the same token in the Asaas dashboard (header
@@ -937,6 +882,357 @@ export function createApp(dir: TenantDirectory | null): express.Express {
       });
     }
   }
+
+  // --- Public self-service checkout ------------------------------------------
+  const checkoutLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { error: "Muitas tentativas. Aguarde 15 minutos." },
+  });
+
+  app.post("/api/checkout", checkoutLimiter, express.json(), async (req, res) => {
+    try {
+      const isDbMode = dir instanceof DbTenantDirectory;
+      const asaasKey = process.env.ASAAS_API_KEY;
+      
+      if (!asaasKey) {
+        // Return mock success for local UI testing when Asaas isn't configured
+        if (process.env.NODE_ENV !== "production") {
+          setTimeout(() => {
+            res.status(201).json({
+              accessKey: "local_mock_access_key_" + randomBytes(4).toString("hex"),
+              invoiceUrl: "https://sandbox.asaas.com/pay/mock",
+              tenantId: "mock-tenant"
+            });
+          }, 800);
+          return;
+        }
+        res.status(503).json({ error: "Pagamento indisponível no momento. Configure o Asaas." });
+        return;
+      }
+
+      const asaas = new AsaasClient(asaasKey);
+      const { name, email, cpfCnpj, plan } = req.body ?? {};
+      if (!name || !email || !cpfCnpj) {
+        res.status(400).json({ error: "Campos obrigatórios: name, email, cpfCnpj." });
+        return;
+      }
+
+      const value = plan === "oficial" ? 347 : 197;
+      const slug = name
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 50)
+        + "-" + randomBytes(3).toString("hex");
+
+      // 1) Create tenant (mock if no DB)
+      let accessKey = "mock_key_sem_banco_" + randomBytes(4).toString("hex");
+      if (isDbMode) {
+        const dbDir = dir as DbTenantDirectory;
+        const resDb = await dbDir.createTenant({
+          id: slug, name, instances: ["*"], isAdmin: false,
+        });
+        accessKey = resDb.accessKey;
+        await dbDir.updateTenant(slug, { status: "suspended" });
+      }
+
+      // 2) Create Asaas customer + subscription
+      const customer = await asaas.createCustomer({ name, cpfCnpj, email });
+      const subscription = await asaas.createSubscription({
+        customerId: customer.id,
+        value,
+        billingType: "UNDEFINED",
+        description: `Conector WhatsApp × Claude — ${plan === "oficial" ? "API Oficial" : "Padrão"}`,
+      });
+
+      // 3) Link Asaas IDs to tenant (if DB enabled)
+      if (isDbMode) {
+        await (dir as DbTenantDirectory).updateTenant(slug, {
+          asaasCustomerId: customer.id,
+          asaasSubscriptionId: subscription.id,
+        });
+      }
+
+      // 4) Get payment link
+      const invoiceUrl = await asaas.getPaymentUrl(subscription.id);
+
+      console.log(`Checkout: tenant ${slug} created → Asaas customer ${customer.id}`);
+      res.status(201).json({ accessKey, invoiceUrl, tenantId: slug });
+    } catch (err: any) {
+      console.error("Checkout error:", err.message);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- Client API (Settings Dashboard) ----------------------------------------
+  const clientAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
+        res.status(401).json({ error: "Acesso negado: chave ausente ou inválida." });
+        return;
+      }
+      const key = authHeader.substring(7).trim();
+
+      const isDbMode = dir instanceof DbTenantDirectory;
+      if (!isDbMode) {
+        // Local mock mode for UI testing
+        if (key.startsWith("local_mock_access_key_") || key.startsWith("mock_key_sem_banco_") || key === "mock_key_12345" || key.startsWith("mock_key_")) {
+          (req as any).clientTenant = {
+            id: "mock-tenant",
+            name: "Cliente Simulado (Dev Local)",
+            instances: ["*"],
+            status: "active",
+            asaas_customer_id: "cus_mock_123",
+            asaas_subscription_id: "sub_mock_123",
+            created_at: new Date(),
+          };
+          return next();
+        }
+        res.status(401).json({ error: "Chave inválida." });
+        return;
+      }
+
+      const dbDir = dir as DbTenantDirectory;
+      const tenant = await dbDir.getTenantByAccessKey(key);
+      if (!tenant) {
+        res.status(401).json({ error: "Chave de acesso inválida." });
+        return;
+      }
+
+      (req as any).clientTenant = tenant;
+      next();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  const clientRouter = express.Router();
+  clientRouter.use(clientAuth, express.json());
+
+  // Get current tenant info + tokens + WhatsApp connection status
+  clientRouter.get("/me", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      let tokens: any[] = [];
+      const isDbMode = dir instanceof DbTenantDirectory;
+      if (isDbMode) {
+        tokens = await (dir as DbTenantDirectory).getTenantTokens(tenant.id);
+      } else {
+        tokens = [
+          { jti: "mock-jti-1", clientId: "Claude Desktop", expiresAt: new Date(Date.now() + 86400000), revoked: false }
+        ];
+      }
+
+      // Read subscription link if Asaas is configured
+      let billingPortalUrl: string | null = null;
+      const asaasKey = process.env.ASAAS_API_KEY;
+      if (asaasKey && tenant.asaas_subscription_id) {
+        try {
+          const asaas = new AsaasClient(asaasKey);
+          billingPortalUrl = await asaas.getPaymentUrl(tenant.asaas_subscription_id);
+        } catch (err) {
+          console.error("Erro ao buscar link do Asaas:", err);
+        }
+      } else if (tenant.asaas_subscription_id) {
+        billingPortalUrl = "https://sandbox.asaas.com/pay/mock-portal";
+      }
+
+      res.json({
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          status: tenant.status,
+          instances: tenant.instances,
+          billingPortalUrl
+        },
+        tokens
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Update profile name
+  clientRouter.patch("/me", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.body ?? {};
+      if (typeof name !== "string" || name.trim().length === 0) {
+        res.status(400).json({ error: "Nome inválido." });
+        return;
+      }
+
+      const isDbMode = dir instanceof DbTenantDirectory;
+      if (isDbMode) {
+        await (dir as DbTenantDirectory).updateTenant(tenant.id, { name: name.trim() });
+      }
+      tenant.name = name.trim();
+      res.json({ success: true, name: tenant.name });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Revoke token
+  clientRouter.post("/revoke-token", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { jti } = req.body ?? {};
+      if (!jti) {
+        res.status(400).json({ error: "JTI ausente." });
+        return;
+      }
+
+      const isDbMode = dir instanceof DbTenantDirectory;
+      if (isDbMode) {
+        await (dir as DbTenantDirectory).revokeToken({ jti });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List WhatsApp instances and connection status
+  clientRouter.get("/instances", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const allowed = tenant.instances;
+
+      // 1) List all instances from Evolution
+      let allInstances: any[] = [];
+      try {
+        allInstances = await client.listInstances();
+      } catch (err) {
+        console.error("Evolution API list error:", err);
+      }
+
+      if (!Array.isArray(allInstances)) {
+        allInstances = [];
+      }
+
+      // Filter to only those allowed for this tenant
+      if (allowed !== "*") {
+        allInstances = allInstances.filter((item: any) => {
+          const name = item?.name ?? item?.instance?.instanceName;
+          return typeof name === "string" && allowed.includes(name);
+        });
+      }
+
+      // For each instance, resolve its connection status
+      const records = await Promise.all(
+        allInstances.map(async (item: any) => {
+          const name = item?.name ?? item?.instance?.instanceName;
+          let status = "DISCONNECTED";
+          
+          try {
+            const statusRes = await client.getInstanceStatus(name);
+            status = statusRes?.instance?.state || "DISCONNECTED";
+          } catch (err) {
+            // Ignore status check errors
+          }
+
+          // Fetch Typebot settings
+          let typebot: any = null;
+          try {
+            const typebotRes = await client.getTypebotSettings(name);
+            typebot = {
+              enabled: typebotRes?.typebot?.enabled ?? typebotRes?.enabled ?? false,
+              url: typebotRes?.typebot?.url ?? typebotRes?.url ?? "",
+              typebot: typebotRes?.typebot?.typebot ?? typebotRes?.typebot ?? "",
+            };
+          } catch (err) {
+            // Ignore typebot fetching errors
+          }
+
+          return { name, status, typebot };
+        })
+      );
+
+      res.json({ instances: records });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Get QR Code / Connect Instance
+  clientRouter.post("/instances/:name/connect", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      const allowed = tenant.instances;
+
+      if (allowed !== "*" && !allowed.includes(name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+
+      const result = await client.connectInstance(name);
+      res.json({
+        base64: result?.base64 || null,
+        pairingCode: result?.code || null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Logout instance
+  clientRouter.post("/instances/:name/logout", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      const allowed = tenant.instances;
+
+      if (allowed !== "*" && !allowed.includes(name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+
+      await client.logoutInstance(name);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Configure Typebot
+  clientRouter.post("/instances/:name/typebot", express.json(), async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const { name } = req.params;
+      const allowed = tenant.instances;
+
+      if (allowed !== "*" && !allowed.includes(name)) {
+        res.status(403).json({ error: "Instância não permitida." });
+        return;
+      }
+
+      const { enabled, url, typebot } = req.body ?? {};
+      if (enabled && (!url || !typebot)) {
+        res.status(400).json({ error: "URL e Slug do Typebot são obrigatórios ao ativar." });
+        return;
+      }
+
+      const payload = {
+        enabled: enabled === true,
+        url: url || "",
+        typebot: typebot || "",
+        listeningFromMe: false,
+        stopBotFromMe: true,
+      };
+
+      await client.configureTypebot(name, payload);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.use("/api/client", clientRouter);
 
   return app;
 }

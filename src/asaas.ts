@@ -32,9 +32,14 @@ export interface AsaasSubscriptionInput {
 export class AsaasClient {
   private http: AxiosInstance;
 
-  constructor(apiKey: string, baseUrl = process.env.ASAAS_BASE_URL || "https://api.asaas.com/v3") {
+  constructor(apiKey: string, baseUrl?: string) {
+    let defaultUrl = "https://api.asaas.com/v3";
+    if (apiKey.startsWith("$aact_hmlg_")) {
+      defaultUrl = "https://api-sandbox.asaas.com/v3";
+    }
+    const resolvedUrl = baseUrl || process.env.ASAAS_BASE_URL || defaultUrl;
     this.http = axios.create({
-      baseURL: baseUrl.replace(/\/+$/, ""),
+      baseURL: resolvedUrl.replace(/\/+$/, ""),
       headers: { "Content-Type": "application/json", access_token: apiKey },
     });
   }

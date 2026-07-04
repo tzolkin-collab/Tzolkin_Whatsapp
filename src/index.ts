@@ -1087,8 +1087,16 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         });
       }
 
-      // 4) Get payment link
-      const invoiceUrl = await asaas.getPaymentUrl(subscription.id);
+      // 4) Get payment link — o Asaas pode levar alguns segundos para gerar
+      // a primeira cobrança da assinatura; tenta 3x antes de desistir.
+      let invoiceUrl: string | null = null;
+      for (let attempt = 0; attempt < 3 && !invoiceUrl; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500));
+        invoiceUrl = await asaas.getPaymentUrl(subscription.id);
+      }
+      if (!invoiceUrl) {
+        console.warn(`Checkout: assinatura ${subscription.id} criada, mas invoiceUrl ainda não disponível.`);
+      }
 
       console.log(`Checkout: tenant ${slug} created → Asaas customer ${customer.id}`);
       res.status(201).json({ accessKey, invoiceUrl, tenantId: slug });
@@ -1158,10 +1166,12 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         ];
       }
 
-      // Read subscription link if Asaas is configured
+      // Read subscription link if Asaas is configured. Só consulta o Asaas
+      // real em modo DB — tenant mock tem subscription fake (sub_mock_123)
+      // que não existe lá, mesmo com ASAAS_API_KEY definida no dev.
       let billingPortalUrl: string | null = null;
       const asaasKey = process.env.ASAAS_API_KEY;
-      if (asaasKey && tenant.asaas_subscription_id) {
+      if (isDbMode && asaasKey && tenant.asaas_subscription_id) {
         try {
           const asaas = new AsaasClient(asaasKey);
           billingPortalUrl = await asaas.getPaymentUrl(tenant.asaas_subscription_id);

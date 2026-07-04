@@ -72,6 +72,7 @@ export type TenantRecord = {
   status: string;
   asaas_customer_id: string | null;
   asaas_subscription_id: string | null;
+  typebot_workspace_id: string | null;
   created_at: Date;
 };
 
@@ -89,6 +90,7 @@ export type UpdateTenantInput = Partial<{
   status: "active" | "suspended";
   asaasCustomerId: string | null;
   asaasSubscriptionId: string | null;
+  typebotWorkspaceId: string | null;
 }>;
 
 const TENANT_ID_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/;
@@ -110,9 +112,16 @@ export class DbTenantDirectory implements TenantDirectory {
         status TEXT NOT NULL DEFAULT 'active',
         asaas_customer_id TEXT,
         asaas_subscription_id TEXT,
+        typebot_workspace_id TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    // Bases criadas antes da coluna existir (migracao leve, idempotente).
+    try {
+      await pool.query(`ALTER TABLE wa_tenants ADD COLUMN typebot_workspace_id TEXT`);
+    } catch {
+      // coluna ja existe
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS wa_tokens (
         jti TEXT PRIMARY KEY,
@@ -212,7 +221,7 @@ export class DbTenantDirectory implements TenantDirectory {
 
   async listTenants(): Promise<TenantRecord[]> {
     const r = await this.pool.query(
-      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, typebot_workspace_id, created_at
          FROM wa_tenants ORDER BY id`
     );
     return r.rows.map((row) => ({ ...row, instances: row.is_admin ? "*" : row.instances }));
@@ -231,6 +240,7 @@ export class DbTenantDirectory implements TenantDirectory {
     if (patch.status !== undefined) push("status", patch.status);
     if (patch.asaasCustomerId !== undefined) push("asaas_customer_id", patch.asaasCustomerId);
     if (patch.asaasSubscriptionId !== undefined) push("asaas_subscription_id", patch.asaasSubscriptionId);
+    if (patch.typebotWorkspaceId !== undefined) push("typebot_workspace_id", patch.typebotWorkspaceId);
     if (sets.length === 0) return false;
     values.push(id);
     const r = await this.pool.query(
@@ -274,7 +284,7 @@ export class DbTenantDirectory implements TenantDirectory {
 
   async getTenantById(id: string): Promise<TenantRecord | null> {
     const r = await this.pool.query(
-      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, typebot_workspace_id, created_at
          FROM wa_tenants WHERE id = $1`,
       [id]
     );
@@ -289,7 +299,7 @@ export class DbTenantDirectory implements TenantDirectory {
   async getTenantByAccessKey(accessKey: string): Promise<TenantRecord | null> {
     const hash = hashSecretString(accessKey);
     const r = await this.pool.query(
-      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, typebot_workspace_id, created_at
          FROM wa_tenants WHERE access_key_hash = $1`,
       [hash]
     );
@@ -362,7 +372,7 @@ export class DbTenantDirectory implements TenantDirectory {
    */
   async findTenantByInstance(instanceName: string): Promise<TenantRecord | null> {
     const r = await this.pool.query(
-      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, created_at
+      `SELECT id, name, instances, is_admin, status, asaas_customer_id, asaas_subscription_id, typebot_workspace_id, created_at
          FROM wa_tenants WHERE is_admin = FALSE`
     );
     for (const row of r.rows) {

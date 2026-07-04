@@ -373,7 +373,10 @@ export class WhatsAppOAuthProvider implements OAuthServerProvider {
     let jti: string | undefined;
     if (this.directory && entry.tenantId) {
       jti = randomUUID();
-      await this.directory.registerToken(jti, entry.tenantId, client.client_id, exp);
+      // client_id aqui é um blob assinado gigante (StatelessClientsStore) —
+      // para exibição no painel, grava o nome amigável do app.
+      const clientLabel = client.client_name || "Aplicativo MCP";
+      await this.directory.registerToken(jti, entry.tenantId, clientLabel, exp);
     }
 
     const accessToken = sign({

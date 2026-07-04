@@ -823,12 +823,13 @@ export function createApp(dir: TenantDirectory | null): express.Express {
 
       admin.patch("/tenants/:id", async (req, res) => {
         try {
-          const { name, instances, admin: isAdmin, status } = req.body ?? {};
+          const { name, instances, admin: isAdmin, status, typebotWorkspaceId } = req.body ?? {};
           const ok = await dir.updateTenant(req.params.id, {
             name,
             instances,
             isAdmin,
             status,
+            typebotWorkspaceId,
           });
           if (!ok) {
             res.status(404).json({ error: "Tenant não encontrado ou nada a atualizar." });
@@ -1258,7 +1259,7 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         allInstances.map(async (item: any) => {
           const name = item?.name ?? item?.instance?.instanceName;
           let status = "DISCONNECTED";
-          
+
           try {
             const statusRes = await client.getInstanceStatus(name);
             status = statusRes?.instance?.state || "DISCONNECTED";
@@ -1279,7 +1280,14 @@ export function createApp(dir: TenantDirectory | null): express.Express {
             // Ignore typebot fetching errors
           }
 
-          return { name, status, typebot };
+          // Identidade humana da conexão (quando pareada): número + nome do
+          // perfil — a UI mostra isso em vez do slug da instância.
+          const ownerJid: string | undefined = item?.ownerJid ?? item?.instance?.owner;
+          const phone = typeof ownerJid === "string" ? ownerJid.split("@")[0] : null;
+          const profileName = item?.profileName ?? item?.instance?.profileName ?? null;
+          const profilePicUrl = item?.profilePicUrl ?? item?.instance?.profilePictureUrl ?? null;
+
+          return { name, status, typebot, phone, profileName, profilePicUrl };
         })
       );
 
@@ -1343,14 +1351,17 @@ export function createApp(dir: TenantDirectory | null): express.Express {
       }
 
       const { enabled, url, typebot } = req.body ?? {};
-      if (enabled && (!url || !typebot)) {
-        res.status(400).json({ error: "URL e Slug do Typebot são obrigatórios ao ativar." });
+      // Typebot é hospedado pela Tzolkin: a URL do viewer é infraestrutura,
+      // não escolha do cliente — o front não precisa (nem deve) enviá-la.
+      const effectiveUrl = url || process.env.TYPEBOT_VIEWER_URL || "";
+      if (enabled && (!effectiveUrl || !typebot)) {
+        res.status(400).json({ error: "Escolha o fluxo do chatbot para ativar." });
         return;
       }
 
       const payload = {
         enabled: enabled === true,
-        url: url || "",
+        url: effectiveUrl,
         typebot: typebot || "",
         listeningFromMe: false,
         stopBotFromMe: true,
@@ -1425,6 +1436,58 @@ export function createApp(dir: TenantDirectory | null): express.Express {
 
   // --- Aba Typebot (painel do cliente) -----------------------------------------
 
+  // Fluxos disponíveis no Typebot hospedado (workspace do tenant) — alimenta
+  // o <select> "Escolha o fluxo" no painel, em vez do cliente digitar slug.
+  // Envs: TYPEBOT_API_URL (builder), TYPEBOT_API_TOKEN (token de serviço).
+  // O workspace de cada tenant é vinculado no onboarding via
+  // PATCH /admin/tenants/:id { typebotWorkspaceId }.
+  clientRouter.get("/typebot/flows", async (req, res) => {
+    try {
+      const tenant = (req as any).clientTenant;
+      const viewerUrl = process.env.TYPEBOT_VIEWER_URL ?? null;
+
+      if (!(dir instanceof DbTenantDirectory)) {
+        // Mock local para desenvolvimento da UI sem banco
+        res.json({
+          flows: [
+            { id: "mock-1", name: "Atendimento Comercial", publicId: "atendimento-comercial" },
+            { id: "mock-2", name: "Suporte Fora do Horário", publicId: "suporte-fora-horario" },
+          ],
+          viewerUrl,
+        });
+        return;
+      }
+
+      const apiUrl = process.env.TYPEBOT_API_URL;
+      const apiToken = process.env.TYPEBOT_API_TOKEN;
+      if (!apiUrl || !apiToken) {
+        res.json({ flows: [], notConfigured: true, reason: "Integração com o builder do Typebot não configurada no servidor.", viewerUrl });
+        return;
+      }
+      const workspaceId = tenant.typebot_workspace_id;
+      if (!workspaceId) {
+        res.json({ flows: [], notConfigured: true, reason: "Seu espaço de chatbot ainda não foi criado — fale com a Tzolkin.", viewerUrl });
+        return;
+      }
+
+      const r = await fetch(
+        `${apiUrl.replace(/\/+$/, "")}/api/v1/typebots?workspaceId=${encodeURIComponent(workspaceId)}`,
+        { headers: { Authorization: `Bearer ${apiToken}` } }
+      );
+      if (!r.ok) throw new Error(`Builder do Typebot respondeu ${r.status}`);
+      const data: any = await r.json();
+      const flows = (data?.typebots ?? []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        // publicId é o identificador que o viewer (e a Evolution) usam.
+        publicId: t.publicId ?? null,
+      }));
+      res.json({ flows, viewerUrl });
+    } catch (err: any) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   // Visão completa: fluxos vinculados + defaults da instância.
   clientRouter.get("/instances/:name/typebot", async (req, res) => {
     try {
@@ -1479,8 +1542,9 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         debounceTime,
       } = req.body ?? {};
 
-      if (enabled && (!url || !typebot)) {
-        res.status(400).json({ error: "URL e fluxo do Typebot são obrigatórios ao ativar." });
+      const effectiveUrl = url || process.env.TYPEBOT_VIEWER_URL || "";
+      if (enabled && (!effectiveUrl || !typebot)) {
+        res.status(400).json({ error: "Escolha o fluxo do chatbot para ativar." });
         return;
       }
       if (triggerType === "keyword" && !triggerValue) {
@@ -1490,7 +1554,7 @@ export function createApp(dir: TenantDirectory | null): express.Express {
 
       const payload = {
         enabled: enabled === true,
-        url: url || "",
+        url: effectiveUrl,
         typebot: typebot || "",
         triggerType,
         triggerOperator,
@@ -1576,14 +1640,15 @@ export function createApp(dir: TenantDirectory | null): express.Express {
         res.status(403).json({ error: "Instância não permitida." });
         return;
       }
-      if (!number || !url || !typebot) {
-        res.status(400).json({ error: "Campos obrigatórios: number, url, typebot." });
+      const effectiveUrl = url || process.env.TYPEBOT_VIEWER_URL || "";
+      if (!number || !effectiveUrl || !typebot) {
+        res.status(400).json({ error: "Campos obrigatórios: number e typebot (fluxo)." });
         return;
       }
       const remoteJid = String(number).includes("@")
         ? String(number)
         : `${String(number).replace(/\D/g, "")}@s.whatsapp.net`;
-      await client.startTypebotFlow(name, { url, typebot, remoteJid, startSession: true });
+      await client.startTypebotFlow(name, { url: effectiveUrl, typebot, remoteJid, startSession: true });
       res.json({ success: true, remoteJid });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

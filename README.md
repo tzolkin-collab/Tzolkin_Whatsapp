@@ -66,8 +66,11 @@ Fluxo de venda: `POST /admin/tenants` com billing → manda a `accessKey` pro cl
 
 ### API da aba Typebot (`/api/client`, Bearer = chave de acesso)
 
+**Typebot hospedado (envs):** `TYPEBOT_VIEWER_URL` (default do campo `url` — o cliente nunca digita), `TYPEBOT_API_URL` + `TYPEBOT_API_TOKEN` (builder; alimentam o select de fluxos). Workspace por tenant: `PATCH /admin/tenants/:id {"typebotWorkspaceId": "..."}`.
+
 | Rota | Ação |
 | :--- | :--- |
+| `GET /typebot/flows` | Fluxos do workspace do tenant no builder hospedado (para o `<select>` do painel; mock sem banco) |
 | `GET /instances/:name/typebot` | Fluxos vinculados + defaults da instância |
 | `PUT /instances/:name/typebot` | Cria (sem `typebotId`) ou atualiza (com `typebotId`) fluxo — aceita gatilhos (`triggerType/Operator/Value`) e comportamento (`expire`, `keywordFinish`, `delayMessage`, `unknownMessage`, `keepOpen`, `stopBotFromMe`, `debounceTime`) |
 | `DELETE /instances/:name/typebot/:typebotId` | Remove o fluxo |

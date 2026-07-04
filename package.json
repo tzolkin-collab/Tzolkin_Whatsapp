@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node build/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "tunnel": "node scripts/dev-tunnel.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -25,6 +26,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^20.17.9",
     "@types/pg": "^8.20.0",
+    "cloudflared": "^0.7.1",
     "pg-mem": "^3.0.14",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
